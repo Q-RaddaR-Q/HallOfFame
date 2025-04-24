@@ -15,7 +15,7 @@ export default function PixelCanvas() {
   const [pendingPixel, setPendingPixel] = useState<{ x: number, y: number } | null>(null);
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [mouseGridPos, setMouseGridPos] = useState<{ x: number; y: number } | null>(null);
-  
+
   const camera = useRef({
     offsetX: 0,
     offsetY: 0,
@@ -33,15 +33,15 @@ export default function PixelCanvas() {
     }
     return id;
   };
-  
+
   const browserId = getOrCreateBrowserId();
-  
+
   // Load from localStorage
   const getPixelCount = () => {
     const count = localStorage.getItem(`pixelCount-${browserId}`);
     return count ? parseInt(count) : 0;
   };
-  
+
   const [placedCount, setPlacedCount] = useState(getPixelCount());
   // Fake a couple colored pixels to test performance
   useEffect(() => {
@@ -145,24 +145,24 @@ export default function PixelCanvas() {
       setLastMouse({ x: e.clientX, y: e.clientY });
       triggerDraw();
     }
-  
+
     const canvas = canvasRef.current;
     if (!canvas) return;
-  
+
     const rect = canvas.getBoundingClientRect();
     const worldX = (e.clientX - rect.left - camera.current.offsetX) / camera.current.scale;
     const worldY = (e.clientY - rect.top - camera.current.offsetY) / camera.current.scale;
-  
+
     const gridX = Math.floor(worldX);
     const gridY = Math.floor(worldY);
-  
+
     if (gridX >= 0 && gridX < WIDTH && gridY >= 0 && gridY < HEIGHT) {
       setMouseGridPos({ x: gridX, y: gridY });
     } else {
       setMouseGridPos(null);
     }
   };
-  
+
 
   const onMouseUp = () => setIsDragging(false);
 
@@ -219,23 +219,23 @@ export default function PixelCanvas() {
 
   const confirmColor = () => {
     if (!pendingPixel) return;
-  
+
     if (placedCount >= 3) {
       alert("You've already placed 3 pixels.");
       setPendingPixel(null);
       return;
     }
-  
+
     coloredPixels.current.set(`${pendingPixel.x},${pendingPixel.y}`, selectedColor);
-    
+
     const newCount = placedCount + 1;
     setPlacedCount(newCount);
     localStorage.setItem(`pixelCount-${browserId}`, newCount.toString());
-  
+
     setPendingPixel(null);
     triggerDraw();
   };
-  
+
 
 
   const cancelColor = () => {
@@ -244,7 +244,7 @@ export default function PixelCanvas() {
 
   return (
     <div>
-{mode === "edit" && placedCount < 3 && (
+      {mode === "edit" && placedCount < 3 && (
         <div style={{ position: "absolute", top: 10, left: 10, zIndex: 10, display: "flex", gap: 8 }}>
           {COLORS.map((color) => (
             <div
@@ -337,23 +337,23 @@ export default function PixelCanvas() {
 
       />
 
-{mouseGridPos && (
-  <div
-    style={{
-      position: "absolute",
-      bottom: 10,
-      left: 10,
-      backgroundColor: "rgba(255, 255, 255, 0.9)",
-      padding: "6px 10px",
-      borderRadius: "4px",
-      fontSize: "14px",
-      zIndex: 10,
-      border: "1px solid #ccc",
-    }}
-  >
-    🖱️ Mouse at: ({mouseGridPos.x}, {mouseGridPos.y})
-  </div>
-)}
+      {mouseGridPos && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 10,
+            left: 10,
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            padding: "6px 10px",
+            borderRadius: "4px",
+            fontSize: "14px",
+            zIndex: 10,
+            border: "1px solid #ccc",
+          }}
+        >
+          🖱️ Mouse at: ({mouseGridPos.x}, {mouseGridPos.y})
+        </div>
+      )}
 
     </div>
   );
