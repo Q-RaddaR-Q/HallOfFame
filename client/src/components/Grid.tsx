@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { HexColorPicker } from "react-colorful";
 
-const COLORS = ["#ff0000", "#00ff00", "#0000ff", "#ffff00", "#00ffff", "#ff00ff", "#000000", "#ffffff"];
+const COLORS = [
+  "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#00ffff", "#ff00ff", 
+  "#000000", "#ffffff", "#ffa500", "#800080", "#008000", "#ffc0cb"
+];
 
 const WIDTH = 1920;
 const HEIGHT = 1080;
@@ -15,6 +19,8 @@ export default function PixelCanvas() {
   const [pendingPixel, setPendingPixel] = useState<{ x: number, y: number } | null>(null);
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [mouseGridPos, setMouseGridPos] = useState<{ x: number; y: number } | null>(null);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
 
   const camera = useRef({
     offsetX: 0,
@@ -63,7 +69,7 @@ export default function PixelCanvas() {
 
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = "#f0f0f0";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Clamp offset
@@ -84,31 +90,30 @@ export default function PixelCanvas() {
     const viewRight = Math.ceil((canvas.width - camera.current.offsetX) / scale);
     const viewBottom = Math.ceil((canvas.height - camera.current.offsetY) / scale);
 
+    // Draw grid
+    ctx.strokeStyle = "#e0e0e0";
+    ctx.lineWidth = 0.05;
+
+    for (let x = viewLeft; x <= viewRight; x++) {
+      ctx.beginPath();
+      ctx.moveTo(x, viewTop);
+      ctx.lineTo(x, viewBottom);
+      ctx.stroke();
+    }
+
+    for (let y = viewTop; y <= viewBottom; y++) {
+      ctx.beginPath();
+      ctx.moveTo(viewLeft, y);
+      ctx.lineTo(viewRight, y);
+      ctx.stroke();
+    }
+
+    // Draw colored pixels
     for (const [key, color] of coloredPixels.current) {
       const [x, y] = key.split(",").map(Number);
       if (x >= viewLeft && x <= viewRight && y >= viewTop && y <= viewBottom) {
         ctx.fillStyle = color;
         ctx.fillRect(x, y, 1, 1);
-      }
-    }
-
-    // Optional: draw grid only when zoomed in
-    if (scale >= 8) {
-      ctx.strokeStyle = "#ccc";
-      ctx.lineWidth = 0.05;
-
-      for (let x = viewLeft; x <= viewRight; x++) {
-        ctx.beginPath();
-        ctx.moveTo(x, viewTop);
-        ctx.lineTo(x, viewBottom);
-        ctx.stroke();
-      }
-
-      for (let y = viewTop; y <= viewBottom; y++) {
-        ctx.beginPath();
-        ctx.moveTo(viewLeft, y);
-        ctx.lineTo(viewRight, y);
-        ctx.stroke();
       }
     }
 
@@ -190,6 +195,7 @@ export default function PixelCanvas() {
     const maxScale = 50; // You can zoom in a LOT, but not out too far
 
     newScale = Math.max(minScale, Math.min(newScale, maxScale));
+    setZoomLevel(newScale);
 
     // Adjust offset so zoom centers around the cursor
     camera.current.scale = newScale;
@@ -243,82 +249,186 @@ export default function PixelCanvas() {
   };
 
   return (
-    <div>
-      {mode === "edit" && placedCount < 3 && (
-        <div style={{ position: "absolute", top: 10, left: 10, zIndex: 10, display: "flex", gap: 8 }}>
-          {COLORS.map((color) => (
-            <div
-              key={color}
-              onClick={() => setSelectedColor(color)}
-              style={{
-                width: 30,
-                height: 30,
-                backgroundColor: color,
-                border: color === selectedColor ? "2px solid black" : "1px solid #999",
-                cursor: "pointer",
-              }}
-            />
-          ))}
-        </div>
-      )}
-      <div style={{ position: "absolute", top: 10, right: 10, zIndex: 10 }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
+      {/* Modern UI Controls */}
+      <div style={{
+        position: "absolute",
+        top: 20,
+        left: 20,
+        zIndex: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        backgroundColor: "rgba(255, 255, 255, 0.9)",
+        padding: "15px",
+        borderRadius: "12px",
+        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+      }}>
         <button
           onClick={() => setMode(mode === "view" ? "edit" : "view")}
           style={{
             padding: "10px 15px",
             fontSize: "14px",
             cursor: "pointer",
-            backgroundColor: mode === "edit" ? "#eee" : "#ddd",
-            border: "1px solid #aaa",
-            borderRadius: "4px"
+            backgroundColor: mode === "edit" ? "#4CAF50" : "#2196F3",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            transition: "all 0.3s ease",
           }}
         >
-          Switch to {mode === "edit" ? "View" : "Edit"} Mode
+          {mode === "edit" ? "Switch to View Mode" : "Switch to Edit Mode"}
         </button>
+
+        {mode === "edit" && placedCount < 3 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", maxWidth: "200px" }}>
+              {COLORS.map((color) => (
+                <div
+                  key={color}
+                  onClick={() => setSelectedColor(color)}
+                  style={{
+                    width: 25,
+                    height: 25,
+                    backgroundColor: color,
+                    border: color === selectedColor ? "2px solid #000" : "1px solid #ccc",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    transition: "transform 0.2s ease",
+                    transform: color === selectedColor ? "scale(1.1)" : "scale(1)",
+                  }}
+                />
+              ))}
+            </div>
+            <button
+              onClick={() => setShowColorPicker(!showColorPicker)}
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#f0f0f0",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+            >
+              Custom Color
+            </button>
+            {showColorPicker && (
+              <div style={{ position: "absolute", top: "100%", left: 0, marginTop: "10px" }}>
+                <HexColorPicker color={selectedColor} onChange={setSelectedColor} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
+      {/* Zoom Level Indicator */}
+      <div style={{
+        position: "absolute",
+        bottom: 20,
+        right: 20,
+        backgroundColor: "rgba(255, 255, 255, 0.9)",
+        padding: "8px 12px",
+        borderRadius: "6px",
+        fontSize: "14px",
+        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+      }}>
+        Zoom: {Math.round(zoomLevel * 100)}%
+      </div>
 
+      {/* Mouse Position Indicator */}
+      {mouseGridPos && (
+        <div style={{
+          position: "absolute",
+          bottom: 20,
+          left: 20,
+          backgroundColor: "rgba(255, 255, 255, 0.9)",
+          padding: "8px 12px",
+          borderRadius: "6px",
+          fontSize: "14px",
+          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+        }}>
+          Position: ({mouseGridPos.x}, {mouseGridPos.y})
+        </div>
+      )}
+
+      {/* Pixel Placement Confirmation Modal */}
       {pendingPixel && (
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            background: "white",
-            padding: "20px 30px",
-            borderRadius: "8px",
-            boxShadow: "0 0 20px rgba(0,0,0,0.3)",
-            zIndex: 20,
-          }}
-        >
-          <p style={{ marginBottom: 12 }}>
-            Are you sure you want to color pixel at ({pendingPixel.x}, {pendingPixel.y})?
-          </p>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-            <button onClick={confirmColor} style={{ padding: "8px 12px" }}>Yes</button>
-            <button onClick={cancelColor} style={{ padding: "8px 12px" }}>No</button>
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: "white",
+            padding: "20px",
+            borderRadius: "12px",
+            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+            maxWidth: "400px",
+            width: "90%",
+          }}>
+            <h3 style={{ marginBottom: "15px", fontSize: "18px" }}>
+              Place Pixel
+            </h3>
+            <p style={{ marginBottom: "20px", color: "#666" }}>
+              Are you sure you want to place a pixel at ({pendingPixel.x}, {pendingPixel.y})?
+            </p>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button
+                onClick={cancelColor}
+                style={{
+                  padding: "8px 16px",
+                  backgroundColor: "#f0f0f0",
+                  border: "1px solid #ccc",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmColor}
+                style={{
+                  padding: "8px 16px",
+                  backgroundColor: "#4CAF50",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                }}
+              >
+                Place Pixel
+              </button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* Pixel Limit Message */}
       {mode === "edit" && placedCount >= 3 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            left: 10,
-            padding: "8px 12px",
-            backgroundColor: "#fff0f0",
-            border: "1px solid #cc0000",
-            borderRadius: "5px",
-            zIndex: 10,
-          }}
-        >
-          🎉 You’ve placed your 3 colors!
+        <div style={{
+          position: "absolute",
+          top: 20,
+          left: "50%",
+          transform: "translateX(-50%)",
+          backgroundColor: "#4CAF50",
+          color: "white",
+          padding: "10px 20px",
+          borderRadius: "6px",
+          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+          zIndex: 10,
+        }}>
+          🎉 You've placed your 3 pixels! Switch to view mode to explore.
         </div>
       )}
 
+      {/* Canvas */}
       <canvas
         ref={canvasRef}
         onMouseDown={onMouseDown}
@@ -334,27 +444,7 @@ export default function PixelCanvas() {
           cursor: isDragging ? "grabbing" : mode === "edit" ? "crosshair" : "grab",
           imageRendering: "pixelated",
         }}
-
       />
-
-      {mouseGridPos && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 10,
-            left: 10,
-            backgroundColor: "rgba(255, 255, 255, 0.9)",
-            padding: "6px 10px",
-            borderRadius: "4px",
-            fontSize: "14px",
-            zIndex: 10,
-            border: "1px solid #ccc",
-          }}
-        >
-          🖱️ Mouse at: ({mouseGridPos.x}, {mouseGridPos.y})
-        </div>
-      )}
-
     </div>
   );
 }
