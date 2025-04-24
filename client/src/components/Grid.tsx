@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { HexColorPicker } from "react-colorful";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import { pixelService, Pixel } from "../services/pixelService";
+
+const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLIC_KEY || '');
 
 const COLORS = [
   "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#00ffff", "#ff00ff", 
@@ -11,6 +16,126 @@ const HEIGHT = 1080;
 
 //1920x920 full screen of boxes
 
+// Payment Form Component
+function PaymentForm({ 
+  amount, 
+  onSuccess, 
+  onCancel, 
+  isProcessing, 
+  setIsProcessing 
+}: { 
+  amount: number; 
+  onSuccess: () => void; 
+  onCancel: () => void; 
+  isProcessing: boolean;
+  setIsProcessing: (processing: boolean) => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!stripe || !elements) return;
+
+    setIsProcessing(true);
+    const { error, paymentMethod } = await stripe.createPaymentMethod({
+      type: 'card',
+      card: elements.getElement(CardElement)!,
+    });
+
+    if (error) {
+      console.error('Payment error:', error);
+      alert(error.message);
+      setIsProcessing(false);
+      return;
+    }
+
+    onSuccess();
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ width: '100%' }}>
+      <div style={{ marginBottom: '20px' }}>
+        <label style={{ display: 'block', marginBottom: '8px' }}>
+          Card Details
+        </label>
+        <div style={{
+          padding: '12px',
+          border: '1px solid #ccc',
+          borderRadius: '4px',
+          backgroundColor: 'white',
+        }}>
+          <CardElement
+            options={{
+              style: {
+                base: {
+                  fontSize: '16px',
+                  color: '#424770',
+                  '::placeholder': {
+                    color: '#aab7c4',
+                  },
+                },
+                invalid: {
+                  color: '#9e2146',
+                },
+              },
+            }}
+          />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: "#f0f0f0",
+            border: "1px solid #ccc",
+            borderRadius: "6px",
+            cursor: "pointer",
+          }}
+          disabled={isProcessing}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          style={{
+            padding: "8px 16px",
+            backgroundColor: "#4CAF50",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+          disabled={!stripe || isProcessing}
+        >
+          {isProcessing ? (
+            <>
+              <span className="spinner" style={{
+                width: "16px",
+                height: "16px",
+                border: "2px solid #ffffff",
+                borderTop: "2px solid transparent",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }} />
+              Processing Payment...
+            </>
+          ) : (
+            <>
+              <span>Pay ${amount.toFixed(2)}</span>
+            </>
+          )}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function PixelCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -21,6 +146,10 @@ export default function PixelCanvas() {
   const [mouseGridPos, setMouseGridPos] = useState<{ x: number; y: number } | null>(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [selectedPixel, setSelectedPixel] = useState<Pixel | null>(null);
+  const [bidAmount, setBidAmount] = useState<number>(0.8);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
 
   const camera = useRef({
     offsetX: 0,
@@ -56,7 +185,24 @@ export default function PixelCanvas() {
     }
   }, []);
 
-  const draw = () => {
+  // Load pixels from the server
+  useEffect(() => {
+    const loadPixels = async () => {
+      try {
+        const pixels = await pixelService.getAllPixels();
+        pixels.forEach((pixel: Pixel) => {
+          coloredPixels.current.set(`${pixel.x},${pixel.y}`, pixel.color);
+        });
+        triggerDraw();
+      } catch (error) {
+        console.error('Error loading pixels:', error);
+      }
+    };
+
+    loadPixels();
+  }, []);
+
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -118,7 +264,9 @@ export default function PixelCanvas() {
     }
 
     ctx.restore();
-  };
+  }, []);
+
+  const triggerDraw = useCallback(() => requestAnimationFrame(draw), [draw]);
 
   // Redraw when state changes
   useEffect(() => {
@@ -131,10 +279,7 @@ export default function PixelCanvas() {
     camera.current.offsetY = (canvas.height - HEIGHT * scale) / 2;
 
     draw();
-  }, []);
-
-
-  const triggerDraw = () => requestAnimationFrame(draw);
+  }, [draw, triggerDraw]);
 
   const onMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
@@ -167,7 +312,6 @@ export default function PixelCanvas() {
       setMouseGridPos(null);
     }
   };
-
 
   const onMouseUp = () => setIsDragging(false);
 
@@ -219,30 +363,65 @@ export default function PixelCanvas() {
     const gridY = Math.floor(y);
 
     if (gridX >= 0 && gridX < WIDTH && gridY >= 0 && gridY < HEIGHT) {
+      // Check if pixel exists and get its price
+      pixelService.getPixel(gridX, gridY)
+        .then(pixel => {
+          setSelectedPixel(pixel);
+          setBidAmount(pixel.price + 0.8);
+        })
+        .catch(() => {
+          setSelectedPixel(null);
+          setBidAmount(0.8);
+        });
       setPendingPixel({ x: gridX, y: gridY });
+    }
+  };
+
+  const handlePaymentSuccess = async () => {
+    try {
+      const ownerId = getOrCreateBrowserId();
+      const result = await pixelService.updatePixel(
+        pendingPixel!.x,
+        pendingPixel!.y,
+        selectedColor,
+        bidAmount,
+        ownerId
+      );
+
+      if (result.clientSecret) {
+        const updatedPixel = await pixelService.handlePaymentSuccess(result.clientSecret);
+        coloredPixels.current.set(`${updatedPixel.x},${updatedPixel.y}`, updatedPixel.color);
+
+        if (!selectedPixel) {
+          const newCount = placedCount + 1;
+          setPlacedCount(newCount);
+          localStorage.setItem(`pixelCount-${browserId}`, newCount.toString());
+        }
+
+        setPendingPixel(null);
+        setSelectedPixel(null);
+        setShowPaymentForm(false);
+        triggerDraw();
+      }
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      alert(error instanceof Error ? error.message : 'Failed to process payment. Please try again.');
+    } finally {
+      setIsProcessingPayment(false);
     }
   };
 
   const confirmColor = () => {
     if (!pendingPixel) return;
 
-    if (placedCount >= 3) {
-      alert("You've already placed 3 pixels.");
+    if (placedCount >= 3 && !selectedPixel) {
+      alert("You've already placed 3 pixels. You need to purchase existing pixels.");
       setPendingPixel(null);
       return;
     }
 
-    coloredPixels.current.set(`${pendingPixel.x},${pendingPixel.y}`, selectedColor);
-
-    const newCount = placedCount + 1;
-    setPlacedCount(newCount);
-    localStorage.setItem(`pixelCount-${browserId}`, newCount.toString());
-
-    setPendingPixel(null);
-    triggerDraw();
+    setShowPaymentForm(true);
   };
-
-
 
   const cancelColor = () => {
     setPendingPixel(null);
@@ -351,7 +530,7 @@ export default function PixelCanvas() {
         </div>
       )}
 
-      {/* Pixel Placement Confirmation Modal */}
+      {/* Payment Modal */}
       {pendingPixel && (
         <div style={{
           position: "fixed",
@@ -374,38 +553,141 @@ export default function PixelCanvas() {
             width: "90%",
           }}>
             <h3 style={{ marginBottom: "15px", fontSize: "18px" }}>
-              Place Pixel
+              {selectedPixel ? "Purchase Pixel" : "Place Pixel"}
             </h3>
             <p style={{ marginBottom: "20px", color: "#666" }}>
-              Are you sure you want to place a pixel at ({pendingPixel.x}, {pendingPixel.y})?
+              {selectedPixel 
+                ? `Current pixel price: $${selectedPixel.price.toFixed(2)}`
+                : placedCount >= 3 
+                  ? "You've used all your free pixels. You need to purchase existing pixels."
+                  : `Are you sure you want to place a pixel at (${pendingPixel.x}, ${pendingPixel.y})?`}
             </p>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-              <button
-                onClick={cancelColor}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#f0f0f0",
-                  border: "1px solid #ccc",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmColor}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#4CAF50",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                }}
-              >
-                Place Pixel
-              </button>
+
+            {/* Price Input Section */}
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", marginBottom: "8px" }}>
+                Set your price (minimum ${selectedPixel ? (selectedPixel.price + 0.8).toFixed(2) : "0.80"}):
+              </label>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <input
+                  type="number"
+                  min={selectedPixel ? selectedPixel.price + 0.8 : 0.8}
+                  step={0.1}
+                  value={bidAmount}
+                  onChange={(e) => setBidAmount(parseFloat(e.target.value))}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    borderRadius: "4px",
+                    border: "1px solid #ccc",
+                  }}
+                />
+                <button
+                  onClick={() => setBidAmount(selectedPixel ? selectedPixel.price + 0.8 : 0.8)}
+                  style={{
+                    padding: "8px 12px",
+                    backgroundColor: "#f0f0f0",
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Min
+                </button>
+              </div>
+              <p style={{ marginTop: "8px", fontSize: "14px", color: "#666" }}>
+                The higher your price, the more protection you have from others taking over your pixel.
+              </p>
             </div>
+
+            {/* Payment Summary */}
+            <div style={{ 
+              padding: "15px", 
+              backgroundColor: "#f8f9fa", 
+              borderRadius: "8px",
+              border: "1px solid #e9ecef",
+              marginBottom: "20px"
+            }}>
+              <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                <span>Pixel Price:</span>
+                <span>${bidAmount.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                <span>Processing Fee:</span>
+                <span>$0.30</span>
+              </div>
+              <div style={{ 
+                display: "flex", 
+                justifyContent: "space-between", 
+                marginTop: "10px",
+                paddingTop: "10px",
+                borderTop: "1px solid #e9ecef",
+                fontWeight: "bold"
+              }}>
+                <span>Total:</span>
+                <span>${(bidAmount + 0.30).toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Payment Form or Action Buttons */}
+            {showPaymentForm ? (
+              <Elements stripe={stripePromise}>
+                <PaymentForm
+                  amount={bidAmount + 0.30}
+                  onSuccess={handlePaymentSuccess}
+                  onCancel={() => setShowPaymentForm(false)}
+                  isProcessing={isProcessingPayment}
+                  setIsProcessing={setIsProcessingPayment}
+                />
+              </Elements>
+            ) : (
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                <button
+                  onClick={cancelColor}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#f0f0f0",
+                    border: "1px solid #ccc",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                {placedCount >= 3 && !selectedPixel && (
+                  <button
+                    onClick={() => {
+                      setPendingPixel(null);
+                      setMode("view");
+                    }}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: "#2196F3",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Switch to View Mode
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowPaymentForm(true)}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: "#4CAF50",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Continue to Payment
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -427,6 +709,16 @@ export default function PixelCanvas() {
           🎉 You've placed your 3 pixels! Switch to view mode to explore.
         </div>
       )}
+
+      {/* Add this style to your existing styles */}
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
 
       {/* Canvas */}
       <canvas
