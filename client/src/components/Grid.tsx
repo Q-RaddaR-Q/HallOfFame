@@ -14,8 +14,6 @@ const COLORS = [
 const WIDTH = 1920;
 const HEIGHT = 1080;
 
-//1920x920 full screen of boxes
-
 // Payment Form Component
 function PaymentForm({ 
   amount, 
@@ -38,7 +36,7 @@ function PaymentForm({
     if (!stripe || !elements) return;
 
     setIsProcessing(true);
-    const { error, paymentMethod } = await stripe.createPaymentMethod({
+    const { error } = await stripe.createPaymentMethod({
       type: 'card',
       card: elements.getElement(CardElement)!,
     });
@@ -150,6 +148,8 @@ export default function PixelCanvas() {
   const [bidAmount, setBidAmount] = useState<number>(0.8);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [showChoiceModal, setShowChoiceModal] = useState(false);
+  const [isPlacingFreePixel, setIsPlacingFreePixel] = useState(false); // New state for free pixel loading
 
   const camera = useRef({
     offsetX: 0,
@@ -178,6 +178,7 @@ export default function PixelCanvas() {
   };
 
   const [placedCount, setPlacedCount] = useState(getPixelCount());
+
   // Fake a couple colored pixels to test performance
   useEffect(() => {
     for (let i = 0; i < 1000; i++) {
@@ -336,7 +337,7 @@ export default function PixelCanvas() {
     const minScaleX = canvas.width / WIDTH;
     const minScaleY = canvas.height / HEIGHT;
     const minScale = Math.min(minScaleX, minScaleY);
-    const maxScale = 50; // You can zoom in a LOT, but not out too far
+    const maxScale = 50;
 
     newScale = Math.max(minScale, Math.min(newScale, maxScale));
     setZoomLevel(newScale);
@@ -374,6 +375,54 @@ export default function PixelCanvas() {
           setBidAmount(0.8);
         });
       setPendingPixel({ x: gridX, y: gridY });
+      setShowChoiceModal(true);
+    }
+  };
+
+  const handleFreePixelPlacement = async () => {
+    if (!pendingPixel) return;
+
+    setIsPlacingFreePixel(true); // Disable button during request
+    try {
+      const ownerId = getOrCreateBrowserId();
+      // Attempt to place free pixel
+      const result = await pixelService.updatePixel(
+        pendingPixel.x,
+        pendingPixel.y,
+        selectedColor,
+        0, // Free pixel
+        ownerId
+      );
+
+      // Handle different possible response structures
+      let updatedPixel: Pixel;
+      if ('pixel' in result && result.pixel) {
+        updatedPixel = result.pixel;
+      } else if ('x' in result && 'y' in result && 'color' in result) {
+        updatedPixel = result as Pixel;
+      } else {
+        throw new Error('Unexpected response format from server');
+      }
+
+      coloredPixels.current.set(`${updatedPixel.x},${updatedPixel.y}`, updatedPixel.color);
+      const newCount = placedCount + 1;
+      setPlacedCount(newCount);
+      localStorage.setItem(`pixelCount-${browserId}`, newCount.toString());
+
+      setPendingPixel(null);
+      setSelectedPixel(null);
+      setShowChoiceModal(false);
+      triggerDraw();
+    } catch (error) {
+      console.error('Error placing free pixel:', error);
+      const message = error instanceof Error 
+        ? (error.message.includes('400') 
+            ? 'Invalid request. Free pixel placement may not be supported or pixel is already owned.'
+            : error.message)
+        : 'Failed to place pixel. Please try again.';
+      alert(message);
+    } finally {
+      setIsPlacingFreePixel(false);
     }
   };
 
@@ -401,6 +450,7 @@ export default function PixelCanvas() {
         setPendingPixel(null);
         setSelectedPixel(null);
         setShowPaymentForm(false);
+        setShowChoiceModal(false);
         triggerDraw();
       }
     } catch (error) {
@@ -411,20 +461,10 @@ export default function PixelCanvas() {
     }
   };
 
-  const confirmColor = () => {
-    if (!pendingPixel) return;
-
-    if (placedCount >= 3 && !selectedPixel) {
-      alert("You've already placed 3 pixels. You need to purchase existing pixels.");
-      setPendingPixel(null);
-      return;
-    }
-
-    setShowPaymentForm(true);
-  };
-
   const cancelColor = () => {
     setPendingPixel(null);
+    setShowChoiceModal(false);
+    setShowPaymentForm(false);
   };
 
   return (
@@ -530,8 +570,8 @@ export default function PixelCanvas() {
         </div>
       )}
 
-      {/* Payment Modal */}
-      {pendingPixel && (
+      {/* Payment/Choice Modal */}
+      {pendingPixel && showChoiceModal && (
         <div style={{
           position: "fixed",
           top: 0,
@@ -558,135 +598,197 @@ export default function PixelCanvas() {
             <p style={{ marginBottom: "20px", color: "#666" }}>
               {selectedPixel 
                 ? `Current pixel price: $${selectedPixel.price.toFixed(2)}`
-                : placedCount >= 3 
-                  ? "You've used all your free pixels. You need to purchase existing pixels."
-                  : `Are you sure you want to place a pixel at (${pendingPixel.x}, ${pendingPixel.y})?`}
+                : `You are about to place a pixel at (${pendingPixel.x}, ${pendingPixel.y}).`}
             </p>
 
-            {/* Price Input Section */}
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", marginBottom: "8px" }}>
-                Set your price (minimum ${selectedPixel ? (selectedPixel.price + 0.8).toFixed(2) : "0.80"}):
-              </label>
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                <input
-                  type="number"
-                  min={selectedPixel ? selectedPixel.price + 0.8 : 0.8}
-                  step={0.1}
-                  value={bidAmount}
-                  onChange={(e) => setBidAmount(parseFloat(e.target.value))}
-                  style={{
-                    flex: 1,
-                    padding: "8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ccc",
-                  }}
-                />
-                <button
-                  onClick={() => setBidAmount(selectedPixel ? selectedPixel.price + 0.8 : 0.8)}
-                  style={{
-                    padding: "8px 12px",
-                    backgroundColor: "#f0f0f0",
-                    border: "1px solid #ccc",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Min
-                </button>
-              </div>
-              <p style={{ marginTop: "8px", fontSize: "14px", color: "#666" }}>
-                The higher your price, the more protection you have from others taking over your pixel.
-              </p>
-            </div>
-
-            {/* Payment Summary */}
-            <div style={{ 
-              padding: "15px", 
-              backgroundColor: "#f8f9fa", 
-              borderRadius: "8px",
-              border: "1px solid #e9ecef",
-              marginBottom: "20px"
-            }}>
-              <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-                <span>Pixel Price:</span>
-                <span>${bidAmount.toFixed(2)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-                <span>Processing Fee:</span>
-                <span>$0.30</span>
-              </div>
-              <div style={{ 
-                display: "flex", 
-                justifyContent: "space-between", 
-                marginTop: "10px",
-                paddingTop: "10px",
-                borderTop: "1px solid #e9ecef",
-                fontWeight: "bold"
-              }}>
-                <span>Total:</span>
-                <span>${(bidAmount + 0.30).toFixed(2)}</span>
-              </div>
-            </div>
-
-            {/* Payment Form or Action Buttons */}
             {showPaymentForm ? (
-              <Elements stripe={stripePromise}>
-                <PaymentForm
-                  amount={bidAmount + 0.30}
-                  onSuccess={handlePaymentSuccess}
-                  onCancel={() => setShowPaymentForm(false)}
-                  isProcessing={isProcessingPayment}
-                  setIsProcessing={setIsProcessingPayment}
-                />
-              </Elements>
+              <>
+                {/* Price Input Section */}
+                <div style={{ marginBottom: "20px" }}>
+                  <label style={{ display: "block", marginBottom: "8px" }}>
+                    Set your price (minimum ${selectedPixel ? (selectedPixel.price + 0.8).toFixed(2) : "0.80"}):
+                  </label>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                    <input
+                      type="number"
+                      min={selectedPixel ? selectedPixel.price + 0.8 : 0.8}
+                      step={0.1}
+                      value={bidAmount}
+                      onChange={(e) => setBidAmount(parseFloat(e.target.value))}
+                      style={{
+                        flex: 1,
+                        padding: "8px",
+                        borderRadius: "4px",
+                        border: "1px solid #ccc",
+                      }}
+                    />
+                    <button
+                      onClick={() => setBidAmount(selectedPixel ? selectedPixel.price + 0.8 : 0.8)}
+                      style={{
+                        padding: "8px 12px",
+                        backgroundColor: "#f0f0f0",
+                        border: "1px solid #ccc",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Min
+                    </button>
+                  </div>
+                  <p style={{ marginTop: "8px", fontSize: "14px", color: "#666" }}>
+                    The higher your price, the more protection you have from others taking over your pixel.
+                  </p>
+                </div>
+
+                {/* Payment Summary */}
+                <div style={{ 
+                  padding: "15px", 
+                  backgroundColor: "#f8f9fa", 
+                  borderRadius: "8px",
+                  border: "1px solid #e9ecef",
+                  marginBottom: "20px"
+                }}>
+                  <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                    <span>Pixel Price:</span>
+                    <span>${bidAmount.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                    <span>Processing Fee:</span>
+                    <span>$0.30</span>
+                  </div>
+                  <div style={{ 
+                    display: "flex", 
+                    justifyContent: "space-between", 
+                    marginTop: "10px",
+                    paddingTop: "10px",
+                    borderTop: "1px solid #e9ecef",
+                    fontWeight: "bold"
+                  }}>
+                    <span>Total:</span>
+                    <span>${(bidAmount + 0.30).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {/* Payment Form */}
+                <Elements stripe={stripePromise}>
+                  <PaymentForm
+                    amount={bidAmount + 0.30}
+                    onSuccess={handlePaymentSuccess}
+                    onCancel={() => setShowPaymentForm(false)}
+                    isProcessing={isProcessingPayment}
+                    setIsProcessing={setIsProcessingPayment}
+                  />
+                </Elements>
+              </>
             ) : (
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-                <button
-                  onClick={cancelColor}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#f0f0f0",
-                    border: "1px solid #ccc",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                {placedCount >= 3 && !selectedPixel && (
-                  <button
-                    onClick={() => {
-                      setPendingPixel(null);
-                      setMode("view");
-                    }}
-                    style={{
-                      padding: "8px 16px",
-                      backgroundColor: "#2196F3",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Switch to View Mode
-                  </button>
+              <>
+                {selectedPixel || placedCount >= 3 ? (
+                  <>
+                    <p style={{ marginBottom: "20px", color: "#666" }}>
+                      {selectedPixel 
+                        ? "This pixel is already owned. You must purchase it."
+                        : "You have used all your free pixels. You must purchase this pixel."}
+                    </p>
+                    <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                      <button
+                        onClick={cancelColor}
+                        style={{
+                          padding: "8px 16px",
+                          backgroundColor: "#f0f0f0",
+                          border: "1px solid #ccc",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => setShowPaymentForm(true)}
+                        style={{
+                          padding: "8px 16px",
+                          backgroundColor: "#4CAF50",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Continue to Payment
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p style={{ marginBottom: "20px", fontWeight: "bold" }}>
+                      You have {3 - placedCount} free pixel(s) remaining.
+                    </p>
+                    <p style={{ marginBottom: "20px" }}>
+                      Would you like to use a free pixel or pay to place this pixel?
+                    </p>
+                    <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                      <button
+                        onClick={cancelColor}
+                        style={{
+                          padding: "8px 16px",
+                          backgroundColor: "#f0f0f0",
+                          border: "1px solid #ccc",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                        }}
+                        disabled={isPlacingFreePixel}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleFreePixelPlacement}
+                        style={{
+                          padding: "8px 16px",
+                          backgroundColor: "#2196F3",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: isPlacingFreePixel ? "not-allowed" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        }}
+                        disabled={isPlacingFreePixel}
+                      >
+                        {isPlacingFreePixel ? (
+                          <>
+                            <span className="spinner" style={{
+                              width: "16px",
+                              height: "16px",
+                              border: "2px solid #ffffff",
+                              borderTop: "2px solid transparent",
+                              borderRadius: "50%",
+                              animation: "spin 1s linear infinite",
+                            }} />
+                            Placing...
+                          </>
+                        ) : (
+                          "Use Free Pixel"
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setShowPaymentForm(true)}
+                        style={{
+                          padding: "8px 16px",
+                          backgroundColor: "#4CAF50",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                        }}
+                        disabled={isPlacingFreePixel}
+                      >
+                        Pay for Pixel
+                      </button>
+                    </div>
+                  </>
                 )}
-                <button
-                  onClick={() => setShowPaymentForm(true)}
-                  style={{
-                    padding: "8px 16px",
-                    backgroundColor: "#4CAF50",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Continue to Payment
-                </button>
-              </div>
+              </>
             )}
           </div>
         </div>
@@ -706,7 +808,7 @@ export default function PixelCanvas() {
           boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
           zIndex: 10,
         }}>
-          🎉 You've placed your 3 pixels! Switch to view mode to explore.
+          🎉 You've placed your 3 pixels! You can purchase more pixels or switch to view mode.
         </div>
       )}
 
