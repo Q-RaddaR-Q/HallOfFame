@@ -28,8 +28,8 @@ const PORT = process.env.PORT || 5000;
 async function startServer() {
   try {
     // Sync database to update schema without dropping tables
-    await sequelize.sync({ alter: true });
-    console.log('Database synced successfully');
+    // await sequelize.sync({ alter: true });
+    // console.log('Database synced successfully');
 
     // Start server
     const server = app.listen(PORT, () => {
