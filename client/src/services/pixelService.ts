@@ -11,6 +11,18 @@ export interface Pixel {
   lastUpdated: string;
 }
 
+interface PaymentData {
+  id: string;
+  amount: number;
+  status: string;
+  metadata: {
+    x: number;
+    y: number;
+    color: string;
+    ownerId: string;
+  };
+}
+
 export const pixelService = {
   // Get all pixels
   getAllPixels: async (): Promise<Pixel[]> => {
@@ -24,6 +36,36 @@ export const pixelService = {
     return response.data;
   },
 
+  // Create a payment intent
+  createPaymentIntent: async (
+    x: number, 
+    y: number, 
+    color: string, 
+    price: number,
+    ownerId: string
+  ): Promise<{ clientSecret: string }> => {
+    try {
+      console.log('Creating payment intent with:', { x, y, color, price, ownerId });
+      const response = await axios.post<{ clientSecret: string }>(
+        `${API_URL}/payments/create-payment-intent`,
+        { x, y, color, price, ownerId }
+      );
+      console.log('Payment intent created:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error creating payment intent:', error);
+      if (error.response) {
+        console.error('Axios error details:', {
+          status: error.response.status,
+          data: error.response.data,
+          message: error.message
+        });
+        throw new Error(error.response.data?.message || error.message);
+      }
+      throw error;
+    }
+  },
+
   // Create or update pixel with payment
   updatePixel: async (
     x: number, 
@@ -32,17 +74,35 @@ export const pixelService = {
     price: number = 0,
     ownerId: string,
     paymentIntentId?: string
-  ): Promise<{ pixel?: Pixel; clientSecret?: string; currentPrice?: number }> => {
-    const response = await axios.post<{ pixel?: Pixel; clientSecret?: string; currentPrice?: number }>(
-      `${API_URL}/pixels`,
-      { x, y, color, price, ownerId, paymentIntentId }
-    );
-    return response.data;
+  ): Promise<{ pixel?: Pixel; currentPrice?: number }> => {
+    try {
+      const requestData = { x, y, color, price, ownerId, paymentIntentId };
+      console.log('Updating pixel with:', requestData);
+      
+      const response = await axios.post<{ pixel?: Pixel; currentPrice?: number }>(
+        `${API_URL}/pixels`,
+        requestData
+      );
+      
+      console.log('Pixel update response:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error updating pixel:', error);
+      if (error.response) {
+        console.error('Axios error details:', {
+          status: error.response.status,
+          data: error.response.data,
+          message: error.message
+        });
+        throw new Error(error.response.data?.message || error.message);
+      }
+      throw error;
+    }
   },
 
   // Handle successful payment
-  handlePaymentSuccess: async (paymentIntentId: string): Promise<Pixel> => {
-    const response = await axios.post<Pixel>(`${API_URL}/pixels/payment-success`, { paymentIntentId });
+  handlePaymentSuccess: async (paymentData: PaymentData): Promise<Pixel> => {
+    const response = await axios.post<Pixel>(`${API_URL}/pixels/payment-success`, paymentData);
     return response.data;
   },
 

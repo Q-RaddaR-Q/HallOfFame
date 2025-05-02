@@ -20,35 +20,75 @@ function PaymentForm({
   onSuccess, 
   onCancel, 
   isProcessing, 
-  setIsProcessing 
+  setIsProcessing,
+  pendingPixel,
+  selectedColor,
+  bidAmount,
+  ownerId
 }: { 
   amount: number; 
   onSuccess: () => void; 
   onCancel: () => void; 
   isProcessing: boolean;
   setIsProcessing: (processing: boolean) => void;
+  pendingPixel: { x: number; y: number } | null;
+  selectedColor: string;
+  bidAmount: number;
+  ownerId: string;
 }) {
   const stripe = useStripe();
   const elements = useElements();
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!stripe || !elements) return;
-
-    setIsProcessing(true);
-    const { error } = await stripe.createPaymentMethod({
-      type: 'card',
-      card: elements.getElement(CardElement)!,
-    });
-
-    if (error) {
-      console.error('Payment error:', error);
-      alert(error.message);
-      setIsProcessing(false);
+    if (!stripe || !elements) {
+      console.error('Stripe or Elements not initialized:', { stripe, elements });
       return;
     }
 
-    onSuccess();
+    setIsProcessing(true);
+    try {
+      // First, create the payment intent
+      const { clientSecret } = await pixelService.createPaymentIntent(
+        pendingPixel!.x,
+        pendingPixel!.y,
+        selectedColor,
+        bidAmount,
+        ownerId
+      );
+
+      console.log('Payment intent created with client secret:', clientSecret);
+
+      // Confirm the payment
+      const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(
+        clientSecret,
+        {
+          payment_method: {
+            card: elements.getElement(CardElement)!,
+            billing_details: {
+              name: 'Anonymous User',
+            },
+          },
+        }
+      );
+
+      if (confirmError) {
+        console.error('Payment confirmation error:', confirmError);
+        throw new Error(confirmError.message);
+      }
+
+      console.log('Payment intent status:', paymentIntent?.status);
+      if (paymentIntent && paymentIntent.status === 'succeeded') {
+        onSuccess();
+      } else {
+        throw new Error('Payment was not successful');
+      }
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      alert(error instanceof Error ? error.message : 'Failed to process payment. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -150,6 +190,8 @@ export default function PixelCanvas() {
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [showChoiceModal, setShowChoiceModal] = useState(false);
   const [isPlacingFreePixel, setIsPlacingFreePixel] = useState(false); // New state for free pixel loading
+  const [stripe, setStripe] = useState<any>(null);
+  const [elements, setElements] = useState<any>(null);
 
   const camera = useRef({
     offsetX: 0,
@@ -158,6 +200,8 @@ export default function PixelCanvas() {
   });
 
   const coloredPixels = useRef<Map<string, string>>(new Map());
+
+  const stripeElements = useRef<any>(null);
 
   const getOrCreateBrowserId = () => {
     const key = "pixelCanvasBrowserId";
@@ -428,17 +472,13 @@ export default function PixelCanvas() {
 
   const handlePaymentSuccess = async () => {
     try {
-      const ownerId = getOrCreateBrowserId();
-      const result = await pixelService.updatePixel(
-        pendingPixel!.x,
-        pendingPixel!.y,
-        selectedColor,
-        bidAmount,
-        ownerId
-      );
-
-      if (result.clientSecret) {
-        const updatedPixel = await pixelService.handlePaymentSuccess(result.clientSecret);
+      // Wait for a short delay to allow the webhook to process
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Fetch the updated pixel
+      const updatedPixel = await pixelService.getPixel(pendingPixel!.x, pendingPixel!.y);
+      
+      if (updatedPixel) {
         coloredPixels.current.set(`${updatedPixel.x},${updatedPixel.y}`, updatedPixel.color);
 
         if (!selectedPixel) {
@@ -452,12 +492,12 @@ export default function PixelCanvas() {
         setShowPaymentForm(false);
         setShowChoiceModal(false);
         triggerDraw();
+      } else {
+        throw new Error('Failed to update pixel after payment');
       }
     } catch (error) {
-      console.error('Error processing payment:', error);
-      alert(error instanceof Error ? error.message : 'Failed to process payment. Please try again.');
-    } finally {
-      setIsProcessingPayment(false);
+      console.error('Error updating pixel after payment:', error);
+      alert(error instanceof Error ? error.message : 'Failed to update pixel after payment. Please try again.');
     }
   };
 
@@ -466,6 +506,21 @@ export default function PixelCanvas() {
     setShowChoiceModal(false);
     setShowPaymentForm(false);
   };
+
+  useEffect(() => {
+    const initializeStripe = async () => {
+      try {
+        const stripeInstance = await stripePromise;
+        if (stripeInstance) {
+          setStripe(stripeInstance);
+        }
+      } catch (error) {
+        console.error('Error initializing Stripe:', error);
+      }
+    };
+
+    initializeStripe();
+  }, []);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
@@ -671,13 +726,17 @@ export default function PixelCanvas() {
                 </div>
 
                 {/* Payment Form */}
-                <Elements stripe={stripePromise}>
+                <Elements stripe={stripe}>
                   <PaymentForm
                     amount={bidAmount + 0.30}
                     onSuccess={handlePaymentSuccess}
                     onCancel={() => setShowPaymentForm(false)}
                     isProcessing={isProcessingPayment}
                     setIsProcessing={setIsProcessingPayment}
+                    pendingPixel={pendingPixel}
+                    selectedColor={selectedColor}
+                    bidAmount={bidAmount}
+                    ownerId={getOrCreateBrowserId()}
                   />
                 </Elements>
               </>
