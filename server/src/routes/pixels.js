@@ -180,10 +180,24 @@ router.post('/payment-success', async (req, res) => {
     }
   } catch (err) {
     console.error('Error processing payment:', err);
-    res.status(500).json({ 
-      message: err.message || 'Server error',
-      error: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get free pixel count for a user
+router.get('/free-count/:browserId', async (req, res) => {
+  try {
+    const { browserId } = req.params;
+    const count = await Pixel.count({
+      where: {
+        ownerId: browserId,
+        price: 0
+      }
     });
+    res.json(count);
+  } catch (err) {
+    console.error('Error fetching free pixel count:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

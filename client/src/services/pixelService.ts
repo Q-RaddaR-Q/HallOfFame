@@ -44,5 +44,11 @@ export const pixelService = {
   handlePaymentSuccess: async (paymentIntentId: string): Promise<Pixel> => {
     const response = await axios.post<Pixel>(`${API_URL}/pixels/payment-success`, { paymentIntentId });
     return response.data;
+  },
+
+  // Get free pixel count for a user
+  getFreePixelCount: async (browserId: string): Promise<number> => {
+    const response = await axios.get<number>(`${API_URL}/pixels/free-count/${browserId}`);
+    return response.data;
   }
 }; 
