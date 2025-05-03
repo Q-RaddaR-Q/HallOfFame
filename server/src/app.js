@@ -33,10 +33,19 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log('Webhook endpoint:', `http://localhost:${PORT}/api/payments/webhook`);
-});
+
+// Sync database and start server
+sequelize.sync({ force: true })
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+      console.log('Webhook endpoint:', `http://localhost:${PORT}/api/payments/webhook`);
+    });
+  })
+  .catch(error => {
+    console.error('Unable to sync database:', error);
+    process.exit(1);
+  });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {

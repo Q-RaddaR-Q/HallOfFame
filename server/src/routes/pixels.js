@@ -17,7 +17,13 @@ router.get('/', async (req, res) => {
 // Get pixel by coordinates
 router.get('/:x/:y', async (req, res) => {
   try {
-    const { x, y } = req.params;
+    const x = parseInt(req.params.x, 10);
+    const y = parseInt(req.params.y, 10);
+    
+    if (isNaN(x) || isNaN(y)) {
+      return res.status(400).json({ message: 'Invalid coordinates' });
+    }
+
     const pixel = await Pixel.findOne({
       where: { x, y }
     });
@@ -36,7 +42,13 @@ router.get('/:x/:y', async (req, res) => {
 // Create or update pixel with payment
 router.post('/', async (req, res) => {
   try {
-    const { x, y, color, price, ownerId, paymentIntentId } = req.body;
+    const { color, price, ownerId, paymentIntentId, ownerName } = req.body;
+    const x = parseInt(req.body.x, 10);
+    const y = parseInt(req.body.y, 10);
+
+    if (isNaN(x) || isNaN(y)) {
+      return res.status(400).json({ message: 'Invalid coordinates' });
+    }
     
     // Find existing pixel
     const existingPixel = await Pixel.findOne({
@@ -82,13 +94,14 @@ router.post('/', async (req, res) => {
     // Update or create the pixel
     const [pixel, created] = await Pixel.findOrCreate({
       where: { x, y },
-      defaults: { color, price, ownerId }
+      defaults: { color, price, ownerId, ownerName }
     });
 
     if (!created) {
       pixel.color = color;
       pixel.price = price;
       pixel.ownerId = ownerId;
+      pixel.ownerName = ownerName;
       pixel.lastUpdated = new Date();
       await pixel.save();
     }
@@ -96,10 +109,7 @@ router.post('/', async (req, res) => {
     res.json({ pixel });
   } catch (err) {
     console.error('Error updating pixel:', err);
-    res.status(500).json({ 
-      message: err.message || 'Server error',
-      error: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
@@ -123,9 +133,9 @@ router.post('/payment-success', async (req, res) => {
     }
 
     try {
-      const { x, y, color, ownerId } = metadata;
+      const { x, y, color, ownerId, ownerName } = metadata;
       
-      if (!x || !y || !color || !ownerId) {
+      if (!x || !y || !color || !ownerId || !ownerName) {
         return res.status(400).json({ 
           message: 'Invalid metadata',
           error: 'Required metadata fields are missing'
@@ -145,13 +155,14 @@ router.post('/payment-success', async (req, res) => {
 
       const [pixel, created] = await Pixel.findOrCreate({
         where: { x, y },
-        defaults: { color, price: amount / 100, ownerId }
+        defaults: { color, price: amount / 100, ownerId, ownerName }
       });
 
       if (!created) {
         pixel.color = color;
         pixel.price = amount / 100;
         pixel.ownerId = ownerId;
+        pixel.ownerName = ownerName;
         pixel.lastUpdated = new Date();
         await pixel.save();
       }
@@ -168,7 +179,7 @@ router.post('/payment-success', async (req, res) => {
       });
     }
   } catch (err) {
-    console.error('Error processing payment:', err);
+    console.error('Error handling payment success:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

@@ -11,7 +11,7 @@ router.post('/create-payment-intent', async (req, res) => {
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     console.log('Stripe secret key configured:', !!process.env.STRIPE_SECRET_KEY);
     
-    const { x, y, color, price, ownerId } = req.body;
+    const { x, y, color, price, ownerId, ownerName } = req.body;
     
     // Validate all required fields
     const missingFields = [];
@@ -60,7 +60,8 @@ router.post('/create-payment-intent', async (req, res) => {
         x: x.toString(),
         y: y.toString(),
         color,
-        ownerId
+        ownerId,
+        ownerName
       }
     };
 
@@ -136,8 +137,8 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
         const paymentIntent = event.data.object;
         console.log('Payment intent succeeded:', paymentIntent.id);
         
-        const { x, y, color, ownerId } = paymentIntent.metadata;
-        if (!x || !y || !color || !ownerId) {
+        const { x, y, color, ownerId, ownerName } = paymentIntent.metadata;
+        if (!x || !y || !color || !ownerId || !ownerName) {
           console.error('Missing required metadata in payment intent:', paymentIntent.id);
           break;
         }
@@ -145,13 +146,14 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
         try {
           const [pixel, created] = await Pixel.findOrCreate({
             where: { x, y },
-            defaults: { color, price: paymentIntent.amount / 100, ownerId }
+            defaults: { color, price: paymentIntent.amount / 100, ownerId, ownerName }
           });
 
           if (!created) {
             pixel.color = color;
             pixel.price = paymentIntent.amount / 100;
             pixel.ownerId = ownerId;
+            pixel.ownerName = ownerName;
             pixel.lastUpdated = new Date();
             await pixel.save();
           }

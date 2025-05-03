@@ -8,6 +8,7 @@ export interface Pixel {
   color: string;
   price: number;
   ownerId: string | null;
+  ownerName: string | null;
   lastUpdated: string;
 }
 
@@ -20,6 +21,7 @@ interface PaymentData {
     y: number;
     color: string;
     ownerId: string;
+    ownerName: string;
   };
 }
 
@@ -42,13 +44,14 @@ export const pixelService = {
     y: number, 
     color: string, 
     price: number,
-    ownerId: string
+    ownerId: string,
+    ownerName: string
   ): Promise<{ clientSecret: string }> => {
     try {
-      console.log('Creating payment intent with:', { x, y, color, price, ownerId });
+      console.log('Creating payment intent with:', { x, y, color, price, ownerId, ownerName });
       const response = await axios.post<{ clientSecret: string }>(
         `${API_URL}/payments/create-payment-intent`,
-        { x, y, color, price, ownerId }
+        { x, y, color, price, ownerId, ownerName }
       );
       console.log('Payment intent created:', response.data);
       return response.data;
@@ -73,10 +76,11 @@ export const pixelService = {
     color: string, 
     price: number = 0,
     ownerId: string,
-    paymentIntentId?: string
+    paymentIntentId?: string,
+    ownerName?: string
   ): Promise<{ pixel?: Pixel; currentPrice?: number }> => {
     try {
-      const requestData = { x, y, color, price, ownerId, paymentIntentId };
+      const requestData = { x, y, color, price, ownerId, paymentIntentId, ownerName };
       console.log('Updating pixel with:', requestData);
       
       const response = await axios.post<{ pixel?: Pixel; currentPrice?: number }>(

@@ -23,6 +23,10 @@ const Pixel = sequelize.define('Pixel', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  ownerName: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   lastUpdated: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

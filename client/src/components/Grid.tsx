@@ -24,7 +24,8 @@ function PaymentForm({
   pendingPixel,
   selectedColor,
   bidAmount,
-  ownerId
+  ownerId,
+  ownerName
 }: { 
   amount: number; 
   onSuccess: () => void; 
@@ -35,6 +36,7 @@ function PaymentForm({
   selectedColor: string;
   bidAmount: number;
   ownerId: string;
+  ownerName: string;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -54,7 +56,8 @@ function PaymentForm({
         pendingPixel!.y,
         selectedColor,
         bidAmount,
-        ownerId
+        ownerId,
+        ownerName
       );
 
       console.log('Payment intent created with client secret:', clientSecret);
@@ -66,7 +69,7 @@ function PaymentForm({
           payment_method: {
             card: elements.getElement(CardElement)!,
             billing_details: {
-              name: 'Anonymous User',
+              name: ownerName,
             },
           },
         }
@@ -192,6 +195,9 @@ export default function PixelCanvas() {
   const [isPlacingFreePixel, setIsPlacingFreePixel] = useState(false); // New state for free pixel loading
   const [stripe, setStripe] = useState<any>(null);
   const [elements, setElements] = useState<any>(null);
+  const [ownerName, setOwnerName] = useState('');
+  const [showPixelInfo, setShowPixelInfo] = useState(false);
+  const [selectedPixelInfo, setSelectedPixelInfo] = useState<Pixel | null>(null);
 
   const camera = useRef({
     offsetX: 0,
@@ -395,8 +401,6 @@ export default function PixelCanvas() {
   };
 
   const onCanvasClick = (e: React.MouseEvent) => {
-    if (mode !== "edit") return;
-
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -408,37 +412,50 @@ export default function PixelCanvas() {
     const gridY = Math.floor(y);
 
     if (gridX >= 0 && gridX < WIDTH && gridY >= 0 && gridY < HEIGHT) {
-      // Check if pixel exists and get its price
-      pixelService.getPixel(gridX, gridY)
-        .then(pixel => {
-          setSelectedPixel(pixel);
-          setBidAmount(pixel.price + 0.8);
-        })
-        .catch(() => {
-          setSelectedPixel(null);
-          setBidAmount(0.8);
-        });
-      setPendingPixel({ x: gridX, y: gridY });
-      setShowChoiceModal(true);
+      if (mode === "edit") {
+        // Check if pixel exists and get its price
+        pixelService.getPixel(gridX, gridY)
+          .then(pixel => {
+            setSelectedPixel(pixel);
+            setBidAmount(pixel.price + 0.8);
+          })
+          .catch(() => {
+            setSelectedPixel(null);
+            setBidAmount(0.8);
+          });
+        setPendingPixel({ x: gridX, y: gridY });
+        setShowChoiceModal(true);
+      } else {
+        // In view mode, show pixel info
+        pixelService.getPixel(gridX, gridY)
+          .then(pixel => {
+            setSelectedPixelInfo(pixel);
+            setShowPixelInfo(true);
+          })
+          .catch(() => {
+            setSelectedPixelInfo(null);
+            setShowPixelInfo(false);
+          });
+      }
     }
   };
 
   const handleFreePixelPlacement = async () => {
-    if (!pendingPixel) return;
+    if (!pendingPixel || !ownerName) return;
 
-    setIsPlacingFreePixel(true); // Disable button during request
+    setIsPlacingFreePixel(true);
     try {
       const ownerId = getOrCreateBrowserId();
-      // Attempt to place free pixel
       const result = await pixelService.updatePixel(
         pendingPixel.x,
         pendingPixel.y,
         selectedColor,
-        0, // Free pixel
-        ownerId
+        0,
+        ownerId,
+        undefined,
+        ownerName
       );
 
-      // Handle different possible response structures
       let updatedPixel: Pixel;
       if ('pixel' in result && result.pixel) {
         updatedPixel = result.pixel;
@@ -656,6 +673,25 @@ export default function PixelCanvas() {
                 : `You are about to place a pixel at (${pendingPixel.x}, ${pendingPixel.y}).`}
             </p>
 
+            {/* Name Input Section */}
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", marginBottom: "8px" }}>
+                Your Name:
+              </label>
+              <input
+                type="text"
+                value={ownerName}
+                onChange={(e) => setOwnerName(e.target.value)}
+                placeholder="Enter your name"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                }}
+              />
+            </div>
+
             {showPaymentForm ? (
               <>
                 {/* Price Input Section */}
@@ -737,6 +773,7 @@ export default function PixelCanvas() {
                     selectedColor={selectedColor}
                     bidAmount={bidAmount}
                     ownerId={getOrCreateBrowserId()}
+                    ownerName={ownerName}
                   />
                 </Elements>
               </>
@@ -868,6 +905,69 @@ export default function PixelCanvas() {
           zIndex: 10,
         }}>
           🎉 You've placed your 3 pixels! You can purchase more pixels or switch to view mode.
+        </div>
+      )}
+
+      {/* Pixel Info Modal */}
+      {showPixelInfo && selectedPixelInfo && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: "white",
+            padding: "20px",
+            borderRadius: "12px",
+            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+            maxWidth: "400px",
+            width: "90%",
+          }}>
+            <h3 style={{ marginBottom: "15px", fontSize: "18px" }}>
+              Pixel Information
+            </h3>
+            <div style={{ marginBottom: "20px" }}>
+              <p><strong>Position:</strong> ({selectedPixelInfo.x}, {selectedPixelInfo.y})</p>
+              <p><strong>Color:</strong> 
+                <span style={{
+                  display: "inline-block",
+                  width: "20px",
+                  height: "20px",
+                  backgroundColor: selectedPixelInfo.color,
+                  marginLeft: "10px",
+                  verticalAlign: "middle",
+                  border: "1px solid #ccc",
+                }} />
+              </p>
+              <p><strong>Owner:</strong> {selectedPixelInfo.ownerName || "Unknown"}</p>
+              <p><strong>Price:</strong> ${selectedPixelInfo.price.toFixed(2)}</p>
+              <p><strong>Last Updated:</strong> {new Date(selectedPixelInfo.lastUpdated).toLocaleString()}</p>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => {
+                  setShowPixelInfo(false);
+                  setSelectedPixelInfo(null);
+                }}
+                style={{
+                  padding: "8px 16px",
+                  backgroundColor: "#f0f0f0",
+                  border: "1px solid #ccc",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
