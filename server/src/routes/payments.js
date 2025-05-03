@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Pixel = require('../models/Pixel');
+const { PIXEL_CONFIG } = require('../config/constants');
 
 // Create a payment intent for coloring pixels
 router.post('/create-payment-intent', async (req, res) => {
@@ -55,7 +56,7 @@ router.post('/create-payment-intent', async (req, res) => {
     });
 
     if (existingPixel) {
-      const minBid = existingPixel.price + 0.8;
+      const minBid = existingPixel.price + PIXEL_CONFIG.minPrice;
       if (priceNum < minBid) {
         return res.status(400).json({
           message: 'Bid too low',
@@ -64,11 +65,11 @@ router.post('/create-payment-intent', async (req, res) => {
           currentPrice: existingPixel.price
         });
       }
-    } else if (priceNum < 0.8) {
+    } else if (priceNum < PIXEL_CONFIG.minPrice) {
       return res.status(400).json({
         message: 'Bid too low',
-        error: 'Bid must be at least $0.80 to place a new pixel',
-        minimumBid: 0.8
+        error: `Bid must be at least $${PIXEL_CONFIG.minPrice} to place a new pixel`,
+        minimumBid: PIXEL_CONFIG.minPrice
       });
     }
 

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Pixel = require('../models/Pixel');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { PIXEL_CONFIG } = require('../config/constants');
 
 // Get all pixels
 router.get('/', async (req, res) => {
@@ -55,10 +56,10 @@ router.post('/', async (req, res) => {
       where: { x, y }
     });
 
-    // If pixel exists and new price is not at least 80 cents more, reject
-    if (existingPixel && price <= existingPixel.price + 0.8) {
+    // If pixel exists and new price is not at least minPrice more, reject
+    if (existingPixel && price <= existingPixel.price + PIXEL_CONFIG.minPrice) {
       return res.status(400).json({ 
-        message: 'New price must be at least 80 cents more than current price',
+        message: `New price must be at least $${PIXEL_CONFIG.minPrice} more than current price`,
         currentPrice: existingPixel.price
       });
     }
@@ -200,5 +201,38 @@ router.get('/free-count/:browserId', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// Get pixel configuration
+router.get('/config', async (req, res) => {
+  try {
+    res.json(PIXEL_CONFIG);
+  } catch (error) {
+    console.error('Error getting pixel configuration:', error);
+    res.status(500).json({ error: 'Failed to get pixel configuration' });
+  }
+});
+
+// Update pixel
+router.put('/:x/:y', async (req, res) => {
+  try {
+    const { x, y } = req.params;
+    const { color, price, ownerId, ownerName } = req.body;
+
+    // Validate price against minimum
+    const config = await getConfig();
+    if (price < config.minPrice) {
+      return res.status(400).json({ error: `Price must be at least $${config.minPrice}` });
+    }
+
+    // ... rest of the function ...
+  } catch (error) {
+    // ... error handling ...
+  }
+});
+
+// Helper function to get configuration
+async function getConfig() {
+  return PIXEL_CONFIG;
+}
 
 module.exports = router; 

@@ -3,6 +3,7 @@ import { HexColorPicker } from "react-colorful";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { pixelService, Pixel } from "../services/pixelService";
+import { configService } from "../services/configService";
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLIC_KEY || '');
 
@@ -25,7 +26,8 @@ function PaymentForm({
   selectedColor,
   bidAmount,
   ownerId,
-  ownerName
+  ownerName,
+  minPrice
 }: { 
   amount: number; 
   onSuccess: () => void; 
@@ -37,6 +39,7 @@ function PaymentForm({
   bidAmount: number;
   ownerId: string;
   ownerName: string;
+  minPrice: number;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -49,7 +52,7 @@ function PaymentForm({
     }
 
     // Validate bid amount
-    const minBid = pendingPixel ? bidAmount : 0.8;
+    const minBid = pendingPixel ? bidAmount : minPrice;
     if (bidAmount < minBid) {
       alert(`Your bid must be at least $${minBid.toFixed(2)} to ${pendingPixel ? 'take over this pixel' : 'place a new pixel'}`);
       return;
@@ -195,7 +198,7 @@ export default function PixelCanvas() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [selectedPixel, setSelectedPixel] = useState<Pixel | null>(null);
-  const [bidAmount, setBidAmount] = useState<number>(0.8);
+  const [bidAmount, setBidAmount] = useState<number>(0);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [showChoiceModal, setShowChoiceModal] = useState(false);
@@ -206,6 +209,11 @@ export default function PixelCanvas() {
   const [showPixelInfo, setShowPixelInfo] = useState(false);
   const [selectedPixelInfo, setSelectedPixelInfo] = useState<Pixel | null>(null);
   const [nameValidationAttempted, setNameValidationAttempted] = useState(false);
+  const [minPrice, setMinPrice] = useState<number>(0);
+  const [maxPixels, setMaxPixels] = useState<number>(0);
+  const [processingFee, setProcessingFee] = useState<number>(0);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [isConfigLoaded, setIsConfigLoaded] = useState<boolean>(false);
 
   const camera = useRef({
     offsetX: 0,
@@ -259,6 +267,33 @@ export default function PixelCanvas() {
     };
 
     loadPixels();
+  }, []);
+
+  // Load configuration on component mount
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const [minPrice, maxPixels, processingFee] = await Promise.all([
+          configService.getMinPrice(),
+          configService.getMaxPixels(),
+          configService.getProcessingFee()
+        ]);
+        setMinPrice(minPrice);
+        setMaxPixels(maxPixels);
+        setProcessingFee(processingFee);
+        setBidAmount(minPrice);
+        setConfigError(null);
+        setIsConfigLoaded(true);
+      } catch (error) {
+        console.error('Error loading configuration:', error);
+        setConfigError('Failed to load configuration from server. Viewing only mode enabled.');
+        setIsConfigLoaded(false);
+        // Force view mode when config fails to load
+        setMode("view");
+      }
+    };
+
+    loadConfig();
   }, []);
 
   const draw = useCallback(() => {
@@ -425,11 +460,11 @@ export default function PixelCanvas() {
         pixelService.getPixel(gridX, gridY)
           .then(pixel => {
             setSelectedPixel(pixel);
-            setBidAmount(pixel.price + 0.8);
+            setBidAmount(pixel.price + minPrice);
           })
           .catch(() => {
             setSelectedPixel(null);
-            setBidAmount(0.8);
+            setBidAmount(minPrice);
           });
         setPendingPixel({ x: gridX, y: gridY });
         setShowChoiceModal(true);
@@ -458,7 +493,7 @@ export default function PixelCanvas() {
         pendingPixel.x,
         pendingPixel.y,
         selectedColor,
-        0,
+        minPrice,
         ownerId,
         undefined,
         ownerName
@@ -554,6 +589,23 @@ export default function PixelCanvas() {
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
+      {configError && (
+        <div style={{
+          position: "absolute",
+          top: 20,
+          left: "50%",
+          transform: "translateX(-50%)",
+          backgroundColor: "#ff4444",
+          color: "white",
+          padding: "10px 20px",
+          borderRadius: "6px",
+          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+          zIndex: 1000,
+        }}>
+          {configError}
+        </div>
+      )}
+
       {/* Modern UI Controls */}
       <div style={{
         position: "absolute",
@@ -569,22 +621,24 @@ export default function PixelCanvas() {
         boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
       }}>
         <button
-          onClick={() => setMode(mode === "view" ? "edit" : "view")}
+          onClick={() => isConfigLoaded && setMode(mode === "view" ? "edit" : "view")}
           style={{
             padding: "10px 15px",
             fontSize: "14px",
-            cursor: "pointer",
+            cursor: isConfigLoaded ? "pointer" : "not-allowed",
             backgroundColor: mode === "edit" ? "#4CAF50" : "#2196F3",
             color: "white",
             border: "none",
             borderRadius: "6px",
             transition: "all 0.3s ease",
+            opacity: isConfigLoaded ? 1 : 0.5,
           }}
+          disabled={!isConfigLoaded}
         >
           {mode === "edit" ? "Switch to View Mode" : "Switch to Edit Mode"}
         </button>
 
-        {mode === "edit" && (
+        {mode === "edit" && isConfigLoaded && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", maxWidth: "200px" }}>
               {COLORS.map((color) => (
@@ -727,12 +781,12 @@ export default function PixelCanvas() {
                 {/* Price Input Section */}
                 <div style={{ marginBottom: "20px" }}>
                   <label style={{ display: "block", marginBottom: "8px" }}>
-                    Set your price (minimum ${selectedPixel ? (selectedPixel.price + 0.8).toFixed(2) : "0.80"}):
+                    Set your price (minimum ${selectedPixel ? (selectedPixel.price + minPrice).toFixed(2) : minPrice.toFixed(2)}):
                   </label>
                   <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                     <input
                       type="number"
-                      min={selectedPixel ? selectedPixel.price + 0.8 : 0.8}
+                      min={selectedPixel ? selectedPixel.price + minPrice : minPrice}
                       step={0.1}
                       value={bidAmount}
                       onChange={(e) => {
@@ -745,12 +799,12 @@ export default function PixelCanvas() {
                         flex: 1,
                         padding: "8px",
                         borderRadius: "4px",
-                        border: `1px solid ${bidAmount < (selectedPixel ? selectedPixel.price + 0.8 : 0.8) ? "#ff0000" : "#ccc"}`,
-                        backgroundColor: bidAmount < (selectedPixel ? selectedPixel.price + 0.8 : 0.8) ? "#fff5f5" : "white"
+                        border: `1px solid ${bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) ? "#ff0000" : "#ccc"}`,
+                        backgroundColor: bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) ? "#fff5f5" : "white"
                       }}
                     />
                     <button
-                      onClick={() => setBidAmount(selectedPixel ? selectedPixel.price + 0.8 : 0.8)}
+                      onClick={() => setBidAmount(selectedPixel ? selectedPixel.price + minPrice : minPrice)}
                       style={{
                         padding: "8px 12px",
                         backgroundColor: "#f0f0f0",
@@ -762,7 +816,7 @@ export default function PixelCanvas() {
                       Min
                     </button>
                   </div>
-                  {bidAmount < (selectedPixel ? selectedPixel.price + 0.8 : 0.8) && (
+                  {bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) && (
                     <p style={{ 
                       color: "#ff0000", 
                       fontSize: "12px", 
@@ -770,8 +824,8 @@ export default function PixelCanvas() {
                       marginBottom: 0
                     }}>
                       {selectedPixel 
-                        ? `Your bid must be at least $${(selectedPixel.price + 0.8).toFixed(2)} to take over this pixel`
-                        : `Your bid must be at least $0.80 to place a new pixel`}
+                        ? `Your bid must be at least $${(selectedPixel.price + minPrice).toFixed(2)} to take over this pixel`
+                        : `Your bid must be at least $${minPrice.toFixed(2)} to place a new pixel`}
                     </p>
                   )}
                   <p style={{ marginTop: "8px", fontSize: "14px", color: "#666" }}>
@@ -794,7 +848,7 @@ export default function PixelCanvas() {
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
                     <span>Processing Fee:</span>
-                    <span>$0.30</span>
+                    <span>${processingFee.toFixed(2)}</span>
                   </div>
                   <div style={{ 
                     display: "flex", 
@@ -805,14 +859,14 @@ export default function PixelCanvas() {
                     fontWeight: "bold"
                   }}>
                     <span>Total:</span>
-                    <span>${(bidAmount + 0.30).toFixed(2)}</span>
+                    <span>${(bidAmount + processingFee).toFixed(2)}</span>
                   </div>
                 </div>
 
                 {/* Payment Form */}
                 <Elements stripe={stripe}>
                   <PaymentForm
-                    amount={bidAmount + 0.30}
+                    amount={bidAmount + processingFee}
                     onSuccess={handlePaymentSuccess}
                     onCancel={() => setShowPaymentForm(false)}
                     isProcessing={isProcessingPayment}
@@ -822,12 +876,13 @@ export default function PixelCanvas() {
                     bidAmount={bidAmount}
                     ownerId={getOrCreateBrowserId()}
                     ownerName={ownerName}
+                    minPrice={minPrice}
                   />
                 </Elements>
               </>
             ) : (
               <>
-                {selectedPixel || placedCount >= 3 ? (
+                {selectedPixel || placedCount >= maxPixels ? (
                   <>
                     <p style={{ marginBottom: "20px", color: "#666" }}>
                       {selectedPixel 
@@ -871,7 +926,7 @@ export default function PixelCanvas() {
                 ) : (
                   <>
                     <p style={{ marginBottom: "20px", fontWeight: "bold" }}>
-                      You have {3 - placedCount} free pixel(s) remaining.
+                      You have {maxPixels - placedCount} free pixel(s) remaining.
                     </p>
                     <p style={{ marginBottom: "20px" }}>
                       Would you like to use a free pixel or pay to place this pixel?
@@ -957,7 +1012,7 @@ export default function PixelCanvas() {
       )}
 
       {/* Pixel Limit Message */}
-      {mode === "edit" && placedCount >= 3 && (
+      {mode === "edit" && placedCount >= maxPixels && (
         <div style={{
           position: "absolute",
           top: 20,
@@ -970,7 +1025,7 @@ export default function PixelCanvas() {
           boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
           zIndex: 10,
         }}>
-          🎉 You've placed your 3 pixels! You can purchase more pixels or switch to view mode.
+          🎉 You've placed your {maxPixels} pixels! You can purchase more pixels or switch to view mode.
         </div>
       )}
 
@@ -1055,12 +1110,17 @@ export default function PixelCanvas() {
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
         onWheel={onWheel}
-        onClick={onCanvasClick}
+        onClick={(e) => {
+          if (mode === "edit" && !isConfigLoaded) {
+            return;
+          }
+          onCanvasClick(e);
+        }}
         style={{
           display: "block",
           width: "100vw",
           height: "100vh",
-          cursor: isDragging ? "grabbing" : mode === "edit" ? "crosshair" : "grab",
+          cursor: isDragging ? "grabbing" : mode === "edit" && isConfigLoaded ? "crosshair" : "grab",
           imageRendering: "pixelated",
         }}
       />
