@@ -48,6 +48,13 @@ function PaymentForm({
       return;
     }
 
+    // Validate bid amount
+    const minBid = pendingPixel ? bidAmount : 0.8;
+    if (bidAmount < minBid) {
+      alert(`Your bid must be at least $${minBid.toFixed(2)} to ${pendingPixel ? 'take over this pixel' : 'place a new pixel'}`);
+      return;
+    }
+
     setIsProcessing(true);
     try {
       // First, create the payment intent
@@ -198,6 +205,7 @@ export default function PixelCanvas() {
   const [ownerName, setOwnerName] = useState('');
   const [showPixelInfo, setShowPixelInfo] = useState(false);
   const [selectedPixelInfo, setSelectedPixelInfo] = useState<Pixel | null>(null);
+  const [nameValidationAttempted, setNameValidationAttempted] = useState(false);
 
   const camera = useRef({
     offsetX: 0,
@@ -496,6 +504,11 @@ export default function PixelCanvas() {
       const updatedPixel = await pixelService.getPixel(pendingPixel!.x, pendingPixel!.y);
       
       if (updatedPixel) {
+        // Verify the price matches what we paid
+        if (Math.abs(updatedPixel.price - bidAmount) > 0.01) {
+          throw new Error(`Payment processed with incorrect price. Expected $${bidAmount}, got $${updatedPixel.price}`);
+        }
+
         coloredPixels.current.set(`${updatedPixel.x},${updatedPixel.y}`, updatedPixel.color);
 
         if (!selectedPixel) {
@@ -571,7 +584,7 @@ export default function PixelCanvas() {
           {mode === "edit" ? "Switch to View Mode" : "Switch to Edit Mode"}
         </button>
 
-        {mode === "edit" && placedCount < 3 && (
+        {mode === "edit" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", maxWidth: "200px" }}>
               {COLORS.map((color) => (
@@ -678,18 +691,35 @@ export default function PixelCanvas() {
               <label style={{ display: "block", marginBottom: "8px" }}>
                 Your Name:
               </label>
-              <input
-                type="text"
-                value={ownerName}
-                onChange={(e) => setOwnerName(e.target.value)}
-                placeholder="Enter your name"
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  borderRadius: "4px",
-                  border: "1px solid #ccc",
-                }}
-              />
+              <div style={{ width: "100%", boxSizing: "border-box" }}>
+                <input
+                  type="text"
+                  value={ownerName}
+                  onChange={(e) => {
+                    setOwnerName(e.target.value);
+                    setNameValidationAttempted(false);
+                  }}
+                  placeholder="Enter your name"
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: "4px",
+                    border: `1px solid ${nameValidationAttempted && !ownerName.trim() ? "#ff0000" : "#ccc"}`,
+                    boxSizing: "border-box",
+                    backgroundColor: nameValidationAttempted && !ownerName.trim() ? "#fff5f5" : "white"
+                  }}
+                />
+                {nameValidationAttempted && !ownerName.trim() && (
+                  <p style={{ 
+                    color: "#ff0000", 
+                    fontSize: "12px", 
+                    marginTop: "4px",
+                    marginBottom: 0
+                  }}>
+                    Please enter your name to claim ownership of this pixel
+                  </p>
+                )}
+              </div>
             </div>
 
             {showPaymentForm ? (
@@ -705,12 +735,18 @@ export default function PixelCanvas() {
                       min={selectedPixel ? selectedPixel.price + 0.8 : 0.8}
                       step={0.1}
                       value={bidAmount}
-                      onChange={(e) => setBidAmount(parseFloat(e.target.value))}
+                      onChange={(e) => {
+                        const newBid = parseFloat(e.target.value);
+                        if (!isNaN(newBid)) {
+                          setBidAmount(newBid);
+                        }
+                      }}
                       style={{
                         flex: 1,
                         padding: "8px",
                         borderRadius: "4px",
-                        border: "1px solid #ccc",
+                        border: `1px solid ${bidAmount < (selectedPixel ? selectedPixel.price + 0.8 : 0.8) ? "#ff0000" : "#ccc"}`,
+                        backgroundColor: bidAmount < (selectedPixel ? selectedPixel.price + 0.8 : 0.8) ? "#fff5f5" : "white"
                       }}
                     />
                     <button
@@ -726,6 +762,18 @@ export default function PixelCanvas() {
                       Min
                     </button>
                   </div>
+                  {bidAmount < (selectedPixel ? selectedPixel.price + 0.8 : 0.8) && (
+                    <p style={{ 
+                      color: "#ff0000", 
+                      fontSize: "12px", 
+                      marginTop: "4px",
+                      marginBottom: 0
+                    }}>
+                      {selectedPixel 
+                        ? `Your bid must be at least $${(selectedPixel.price + 0.8).toFixed(2)} to take over this pixel`
+                        : `Your bid must be at least $0.80 to place a new pixel`}
+                    </p>
+                  )}
                   <p style={{ marginTop: "8px", fontSize: "14px", color: "#666" }}>
                     The higher your price, the more protection you have from others taking over your pixel.
                   </p>
@@ -800,7 +848,13 @@ export default function PixelCanvas() {
                         Cancel
                       </button>
                       <button
-                        onClick={() => setShowPaymentForm(true)}
+                        onClick={() => {
+                          setNameValidationAttempted(true);
+                          if (!ownerName.trim()) {
+                            return;
+                          }
+                          setShowPaymentForm(true);
+                        }}
                         style={{
                           padding: "8px 16px",
                           backgroundColor: "#4CAF50",
@@ -837,7 +891,13 @@ export default function PixelCanvas() {
                         Cancel
                       </button>
                       <button
-                        onClick={handleFreePixelPlacement}
+                        onClick={() => {
+                          setNameValidationAttempted(true);
+                          if (!ownerName.trim()) {
+                            return;
+                          }
+                          handleFreePixelPlacement();
+                        }}
                         style={{
                           padding: "8px 16px",
                           backgroundColor: "#2196F3",
@@ -868,7 +928,13 @@ export default function PixelCanvas() {
                         )}
                       </button>
                       <button
-                        onClick={() => setShowPaymentForm(true)}
+                        onClick={() => {
+                          setNameValidationAttempted(true);
+                          if (!ownerName.trim()) {
+                            return;
+                          }
+                          setShowPaymentForm(true);
+                        }}
                         style={{
                           padding: "8px 16px",
                           backgroundColor: "#4CAF50",

@@ -15,8 +15,8 @@ router.post('/create-payment-intent', async (req, res) => {
     
     // Validate all required fields
     const missingFields = [];
-    if (!x) missingFields.push('x');
-    if (!y) missingFields.push('y');
+    if (x === undefined || x === null || x === '') missingFields.push('x');
+    if (y === undefined || y === null || y === '') missingFields.push('y');
     if (!color) missingFields.push('color');
     if (!ownerId) missingFields.push('ownerId');
     if (!price) missingFields.push('price');
@@ -46,6 +46,29 @@ router.post('/create-payment-intent', async (req, res) => {
         message: 'Invalid price',
         error: 'Price must be a positive number',
         receivedPrice: price
+      });
+    }
+
+    // Check if pixel exists and validate minimum bid
+    const existingPixel = await Pixel.findOne({
+      where: { x, y }
+    });
+
+    if (existingPixel) {
+      const minBid = existingPixel.price + 0.8;
+      if (priceNum < minBid) {
+        return res.status(400).json({
+          message: 'Bid too low',
+          error: `Bid must be at least $${minBid.toFixed(2)} to take over this pixel`,
+          minimumBid: minBid,
+          currentPrice: existingPixel.price
+        });
+      }
+    } else if (priceNum < 0.8) {
+      return res.status(400).json({
+        message: 'Bid too low',
+        error: 'Bid must be at least $0.80 to place a new pixel',
+        minimumBid: 0.8
       });
     }
 
@@ -144,22 +167,42 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
         }
 
         try {
+          // Convert x and y to numbers
+          const pixelX = parseInt(x, 10);
+          const pixelY = parseInt(y, 10);
+          
+          if (isNaN(pixelX) || isNaN(pixelY)) {
+            console.error('Invalid coordinates in payment intent:', { x, y });
+            break;
+          }
+
+          // Find existing pixel or create new one
           const [pixel, created] = await Pixel.findOrCreate({
-            where: { x, y },
-            defaults: { color, price: paymentIntent.amount / 100, ownerId, ownerName }
+            where: { x: pixelX, y: pixelY },
+            defaults: { 
+              color, 
+              price: paymentIntent.amount / 100, 
+              ownerId, 
+              ownerName,
+              lastUpdated: new Date()
+            }
           });
 
           if (!created) {
-            pixel.color = color;
-            pixel.price = paymentIntent.amount / 100;
-            pixel.ownerId = ownerId;
-            pixel.ownerName = ownerName;
-            pixel.lastUpdated = new Date();
-            await pixel.save();
+            // Update existing pixel
+            await pixel.update({
+              color,
+              price: paymentIntent.amount / 100,
+              ownerId,
+              ownerName,
+              lastUpdated: new Date()
+            });
           }
-          console.log('Pixel updated successfully:', { x, y });
+
+          console.log('Pixel updated successfully:', { x: pixelX, y: pixelY, created });
         } catch (err) {
           console.error('Error updating pixel after payment:', err);
+          // Don't break here, let the webhook acknowledge receipt
         }
         break;
 
