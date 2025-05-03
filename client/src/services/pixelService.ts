@@ -25,6 +25,17 @@ interface PaymentData {
   };
 }
 
+interface BulkPaymentData {
+  id: string;
+  amount: number;
+  status: string;
+  metadata: {
+    pixels: Array<{ x: number; y: number; color: string }>;
+    ownerId: string;
+    ownerName: string;
+  };
+}
+
 export const pixelService = {
   // Get all pixels
   getAllPixels: async (): Promise<Pixel[]> => {
@@ -113,6 +124,41 @@ export const pixelService = {
   // Get free pixel count for a user
   getFreePixelCount: async (browserId: string): Promise<number> => {
     const response = await axios.get<number>(`${API_URL}/pixels/free-count/${browserId}`);
+    return response.data;
+  },
+
+  // Create a bulk payment intent
+  createBulkPaymentIntent: async (
+    pixels: Array<{ x: number; y: number; color: string }>,
+    price: number,
+    ownerId: string,
+    ownerName: string
+  ): Promise<{ clientSecret: string }> => {
+    try {
+      console.log('Creating bulk payment intent with:', { pixels, price, ownerId, ownerName });
+      const response = await axios.post<{ clientSecret: string }>(
+        `${API_URL}/payments/create-bulk-payment-intent`,
+        { pixels, price, ownerId, ownerName }
+      );
+      console.log('Bulk payment intent created:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error creating bulk payment intent:', error);
+      if (error.response) {
+        console.error('Axios error details:', {
+          status: error.response.status,
+          data: error.response.data,
+          message: error.message
+        });
+        throw new Error(error.response.data?.message || error.message);
+      }
+      throw error;
+    }
+  },
+
+  // Handle successful bulk payment
+  handleBulkPaymentSuccess: async (paymentData: BulkPaymentData): Promise<Pixel[]> => {
+    const response = await axios.post<Pixel[]>(`${API_URL}/pixels/bulk-payment-success`, paymentData);
     return response.data;
   }
 }; 
