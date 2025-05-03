@@ -129,16 +129,16 @@ export const pixelService = {
 
   // Create a bulk payment intent
   createBulkPaymentIntent: async (
-    pixels: Array<{ x: number; y: number; color: string }>,
-    price: number,
+    pixels: Array<{ x: number; y: number; color: string; price: number }>,
+    totalAmount: number,
     ownerId: string,
     ownerName: string
   ): Promise<{ clientSecret: string }> => {
     try {
-      console.log('Creating bulk payment intent with:', { pixels, price, ownerId, ownerName });
+      console.log('Creating bulk payment intent with:', { pixels, totalAmount, ownerId, ownerName });
       const response = await axios.post<{ clientSecret: string }>(
         `${API_URL}/payments/create-bulk-payment-intent`,
-        { pixels, price, ownerId, ownerName }
+        { pixels, totalAmount, ownerId, ownerName }
       );
       console.log('Bulk payment intent created:', response.data);
       return response.data;

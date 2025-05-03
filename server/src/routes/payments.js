@@ -131,13 +131,13 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
     console.log('Request headers:', req.headers);
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     
-    const { pixels, price, ownerId, ownerName } = req.body;
+    const { pixels, totalAmount, ownerId, ownerName } = req.body;
     
     // Validate all required fields
     const missingFields = [];
     if (!pixels || !Array.isArray(pixels) || pixels.length === 0) missingFields.push('pixels');
     if (!ownerId) missingFields.push('ownerId');
-    if (!price) missingFields.push('price');
+    if (!totalAmount) missingFields.push('totalAmount');
     
     if (missingFields.length > 0) {
       console.error('Missing required fields:', missingFields);
@@ -156,23 +156,24 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
       });
     }
 
-    // Validate price is a number and greater than 0
-    const priceNum = parseFloat(price);
-    if (isNaN(priceNum) || priceNum <= 0) {
-      console.error('Invalid price:', price);
+    // Validate total amount is a number and greater than 0
+    const totalAmountNum = parseFloat(totalAmount);
+    if (isNaN(totalAmountNum) || totalAmountNum <= 0) {
+      console.error('Invalid total amount:', totalAmount);
       return res.status(400).json({
-        message: 'Invalid price',
-        error: 'Price must be a positive number',
-        receivedPrice: price
+        message: 'Invalid total amount',
+        error: 'Total amount must be a positive number',
+        receivedAmount: totalAmount
       });
     }
 
-    // Validate each pixel
+    // Validate each pixel and calculate total expected amount
+    let expectedTotal = 0;
     for (const pixel of pixels) {
-      if (!pixel.x || !pixel.y || !pixel.color) {
+      if (!pixel.x || !pixel.y || !pixel.color || !pixel.price) {
         return res.status(400).json({
           message: 'Invalid pixel data',
-          error: 'Each pixel must have x, y, and color properties'
+          error: 'Each pixel must have x, y, color, and price properties'
         });
       }
 
@@ -183,7 +184,7 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
 
       if (existingPixel) {
         const minBid = existingPixel.price + PIXEL_CONFIG.minPrice;
-        if (priceNum < minBid) {
+        if (pixel.price < minBid) {
           return res.status(400).json({
             message: 'Bid too low',
             error: `Bid must be at least $${minBid.toFixed(2)} to take over pixel at (${pixel.x}, ${pixel.y})`,
@@ -192,7 +193,7 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
             pixel: { x: pixel.x, y: pixel.y }
           });
         }
-      } else if (priceNum < PIXEL_CONFIG.minPrice) {
+      } else if (pixel.price < PIXEL_CONFIG.minPrice) {
         return res.status(400).json({
           message: 'Bid too low',
           error: `Bid must be at least $${PIXEL_CONFIG.minPrice} to place a new pixel at (${pixel.x}, ${pixel.y})`,
@@ -200,14 +201,21 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
           pixel: { x: pixel.x, y: pixel.y }
         });
       }
+
+      expectedTotal += pixel.price;
     }
 
-    // Calculate total amount
-    const totalAmount = Math.round(priceNum * pixels.length * 100); // Convert to cents
+    // Verify that the provided total amount matches the sum of individual pixel prices
+    if (Math.abs(expectedTotal - totalAmountNum) > 0.01) {
+      return res.status(400).json({
+        message: 'Total amount mismatch',
+        error: `Total amount (${totalAmountNum}) does not match sum of individual pixel prices (${expectedTotal})`
+      });
+    }
 
-    // Create a PaymentIntent with the order amount and currency
+    // Create a PaymentIntent with the total amount
     const paymentIntentData = {
-      amount: totalAmount,
+      amount: Math.round(totalAmountNum * 100), // Convert to cents
       currency: 'usd',
       automatic_payment_methods: {
         enabled: true,
@@ -229,7 +237,7 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
         x: pixel.x,
         y: pixel.y,
         color: pixel.color,
-        price: priceNum,
+        price: pixel.price,
         ownerId,
         ownerName,
         paymentIntentId: paymentIntent.id,
@@ -320,14 +328,7 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
               where: { paymentIntentId: paymentIntent.id }
             });
 
-            // Update each pixel with the final price
-            for (const pixel of pixels) {
-              await pixel.update({
-                price: paymentIntent.amount / 100 / pixels.length, // Divide total amount by number of pixels
-                lastUpdated: new Date()
-              });
-            }
-
+            // Each pixel already has its correct price stored, no need to recalculate
             console.log('Bulk payment processed successfully:', {
               paymentIntentId: paymentIntent.id,
               pixelCount: pixels.length

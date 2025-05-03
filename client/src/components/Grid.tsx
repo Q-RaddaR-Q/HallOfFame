@@ -211,6 +211,7 @@ const BulkPaymentForm = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [existingPixels, setExistingPixels] = useState<Array<{ x: number; y: number; price: number }>>([]);
   const [totalAmount, setTotalAmount] = useState(0);
+  const [pixelPrices, setPixelPrices] = useState<Map<string, number>>(new Map());
 
   // Load existing pixel prices
   useEffect(() => {
@@ -230,14 +231,33 @@ const BulkPaymentForm = ({
         const validPixels = pixels.filter((p): p is { x: number; y: number; price: number } => p !== null);
         setExistingPixels(validPixels);
         
-        // Calculate total amount
-        const total = validPixels.reduce((sum, pixel) => {
-          return sum + (pixel.price + minPrice);
-        }, 0) + (selectedPixels.length - validPixels.length) * minPrice;
+        // Calculate total amount and set pixel prices
+        const prices = new Map<string, number>();
+        let total = 0;
+        
+        for (const pixel of validPixels) {
+          const price = pixel.price + minPrice; // Add minPrice to existing pixel price
+          prices.set(`${pixel.x},${pixel.y}`, price);
+          total += price;
+        }
+        
+        for (const pixel of selectedPixels) {
+          if (!prices.has(`${pixel.x},${pixel.y}`)) {
+            prices.set(`${pixel.x},${pixel.y}`, minPrice);
+            total += minPrice;
+          }
+        }
+        
+        setPixelPrices(prices);
         setTotalAmount(total);
       } catch (error) {
         console.error('Error loading existing pixels:', error);
         // If we can't load existing pixels, use the minimum price for all
+        const prices = new Map<string, number>();
+        selectedPixels.forEach(pixel => {
+          prices.set(`${pixel.x},${pixel.y}`, minPrice);
+        });
+        setPixelPrices(prices);
         setTotalAmount(selectedPixels.length * minPrice);
       }
     };
@@ -256,8 +276,13 @@ const BulkPaymentForm = ({
     try {
       // Create the bulk payment intent with the total amount
       const { clientSecret } = await pixelService.createBulkPaymentIntent(
-        selectedPixels,
-        totalAmount, // Send the total amount instead of per-pixel price
+        selectedPixels.map(pixel => ({
+          x: pixel.x,
+          y: pixel.y,
+          color: pixel.color,
+          price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice
+        })),
+        totalAmount,
         browserId,
         ownerName
       );
@@ -410,6 +435,8 @@ export default function PixelCanvas() {
   const [selectedPixelForColor, setSelectedPixelForColor] = useState<{ x: number; y: number } | null>(null);
   const [showColorPickerForSelected, setShowColorPickerForSelected] = useState(false);
   const [showBulkPaymentForm, setShowBulkPaymentForm] = useState(false);
+  const [pixelPrices, setPixelPrices] = useState<Map<string, number>>(new Map());
+  const [existingPixels, setExistingPixels] = useState<Array<{ x: number; y: number; price: number }>>([]);
 
   // Add ref for selected pixels
   const selectedPixelsRef = useRef<Array<{ x: number; y: number; color: string }>>([]);
@@ -803,6 +830,11 @@ export default function PixelCanvas() {
       return;
     }
 
+    // Calculate total amount based on individual pixel prices
+    const totalAmount = Array.from(pixelPrices.values()).reduce((sum, price) => {
+      return sum + price; // Use the price directly as it already includes minPrice
+    }, 0);
+
     setShowBulkPaymentForm(true);
   };
 
@@ -811,10 +843,20 @@ export default function PixelCanvas() {
 
     setIsProcessingPayment(true);
     try {
+      // Calculate total amount based on individual pixel prices
+      const totalAmount = Array.from(pixelPrices.values()).reduce((sum, price) => {
+        return sum + price; // Use the price directly as it already includes minPrice
+      }, 0);
+
       // Create a bulk payment intent with the total amount
       const { clientSecret } = await pixelService.createBulkPaymentIntent(
-        selectedPixelsRef.current,
-        selectedPixelsRef.current.length * minPrice, // Total amount for all pixels
+        selectedPixelsRef.current.map(pixel => ({
+          x: pixel.x,
+          y: pixel.y,
+          color: pixel.color,
+          price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice // Include the price for each pixel
+        })),
+        totalAmount,
         getOrCreateBrowserId(),
         ownerName
       );
@@ -941,6 +983,63 @@ export default function PixelCanvas() {
 
     initializeStripe();
   }, []);
+
+  // Add this useEffect to load pixel prices when selection changes
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadPixelPrices = async () => {
+      const newPrices = new Map<string, number>();
+      for (const pixel of selectedPixelsRef.current) {
+        try {
+          const existingPixel = await pixelService.getPixel(pixel.x, pixel.y);
+          if (existingPixel && isMounted) {
+            newPrices.set(`${pixel.x},${pixel.y}`, existingPixel.price);
+          } else if (isMounted) {
+            newPrices.set(`${pixel.x},${pixel.y}`, minPrice);
+          }
+        } catch (error) {
+          console.error(`Error fetching pixel (${pixel.x}, ${pixel.y}):`, error);
+          if (isMounted) {
+            newPrices.set(`${pixel.x},${pixel.y}`, minPrice);
+          }
+        }
+      }
+      if (isMounted) {
+        setPixelPrices(newPrices);
+      }
+    };
+
+    loadPixelPrices();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedPixelsRef.current, minPrice]);
+
+  // Add this useEffect to load existing pixels when selection changes
+  useEffect(() => {
+    const loadExistingPixels = async () => {
+      const pixels = await Promise.all(
+        selectedPixelsRef.current.map(async (pixel) => {
+          try {
+            const existingPixel = await pixelService.getPixel(pixel.x, pixel.y);
+            return existingPixel ? { x: pixel.x, y: pixel.y, price: existingPixel.price } : null;
+          } catch (error) {
+            console.error(`Error fetching pixel (${pixel.x}, ${pixel.y}):`, error);
+            return null;
+          }
+        })
+      );
+      setExistingPixels(pixels.filter((p): p is { x: number; y: number; price: number } => p !== null));
+    };
+
+    if (selectedPixelsRef.current.length > 0) {
+      loadExistingPixels();
+    } else {
+      setExistingPixels([]);
+    }
+  }, [selectedPixelsRef.current]);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
@@ -1118,174 +1217,76 @@ export default function PixelCanvas() {
                 borderRadius: "8px",
                 padding: "10px"
               }}>
-                {selectedPixelsRef.current.map((pixel, index) => (
-                  <div key={`${pixel.x}-${pixel.y}`} style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px",
-                    backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
-                    borderRadius: "4px",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <div 
+                {selectedPixelsRef.current.map((pixel, index) => {
+                  const price = pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice;
+                  return (
+                    <div key={`${pixel.x}-${pixel.y}`} style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "8px",
+                      backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
+                      borderRadius: "4px",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div 
+                          onClick={() => {
+                            setSelectedPixelInfo({
+                              x: pixel.x,
+                              y: pixel.y,
+                              color: pixel.color,
+                              price: price,
+                              ownerId: '',
+                              ownerName: '',
+                              lastUpdated: new Date().toISOString()
+                            });
+                            setShowColorPickerForSelected(true);
+                            setShowColorPicker(false);
+                          }}
+                          style={{
+                            width: "20px",
+                            height: "20px",
+                            backgroundColor: pixel.color,
+                            border: "1px solid #ccc",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            transition: "transform 0.2s ease",
+                          }}
+                          title="Click to change color"
+                        />
+                        <div>
+                          <div>Position: ({pixel.x}, {pixel.y})</div>
+                          <div style={{ fontSize: "12px", color: "#666" }}>
+                            Price: ${price.toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                      <button
                         onClick={() => {
-                          setSelectedPixelInfo({
-                            x: pixel.x,
-                            y: pixel.y,
-                            color: pixel.color,
-                            price: 0,
-                            ownerId: '',
-                            ownerName: '',
-                            lastUpdated: new Date().toISOString()
-                          });
-                          setShowColorPicker(true);
-                        }}
-                        style={{
-                          width: "20px",
-                          height: "20px",
-                          backgroundColor: pixel.color,
-                          border: "1px solid #ccc",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          transition: "transform 0.2s ease",
-                        }}
-                        title="Click to change color"
-                      />
-                      <span>Position: ({pixel.x}, {pixel.y})</span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const index = selectedPixelsRef.current.findIndex(p => p.x === pixel.x && p.y === pixel.y);
-                        if (index !== -1) {
-                          selectedPixelsRef.current = selectedPixelsRef.current.filter((_, i) => i !== index);
-                          setSelectedPixels(selectedPixelsRef.current);
-                          triggerDraw();
-                        }
-                      }}
-                      style={{
-                        padding: "4px 8px",
-                        backgroundColor: "#ff4444",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Color Picker for Selected Pixels */}
-              <div 
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: "-250px",
-                  backgroundColor: "white",
-                  padding: "15px",
-                  borderRadius: "12px",
-                  boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                  transform: showColorPicker && selectedPixelInfo ? "translateX(0)" : "translateX(-100%)",
-                  opacity: showColorPicker && selectedPixelInfo ? 1 : 0,
-                  transition: "transform 0.3s ease-out, opacity 0.3s ease-out",
-                  pointerEvents: showColorPicker && selectedPixelInfo ? "auto" : "none",
-                }}
-              >
-                <div style={{ 
-                  display: "flex", 
-                  flexDirection: "column", 
-                  gap: "10px",
-                  marginBottom: "10px"
-                }}>
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", maxWidth: "200px" }}>
-                    {COLORS.map((color) => (
-                      <div
-                        key={color}
-                        onClick={() => {
-                          if (selectedPixelInfo) {
-                            const updatedPixels = selectedPixelsRef.current.map(p => 
-                              p.x === selectedPixelInfo.x && p.y === selectedPixelInfo.y 
-                                ? { ...p, color } 
-                                : p
-                            );
-                            selectedPixelsRef.current = updatedPixels;
-                            setSelectedPixels(updatedPixels);
+                          const index = selectedPixelsRef.current.findIndex(p => p.x === pixel.x && p.y === pixel.y);
+                          if (index !== -1) {
+                            selectedPixelsRef.current = selectedPixelsRef.current.filter((_, i) => i !== index);
+                            setSelectedPixels(selectedPixelsRef.current);
                             triggerDraw();
                           }
                         }}
                         style={{
-                          width: 25,
-                          height: 25,
-                          backgroundColor: color,
-                          border: "1px solid #ccc",
+                          padding: "4px 8px",
+                          backgroundColor: "#ff4444",
+                          color: "white",
+                          border: "none",
                           borderRadius: "4px",
                           cursor: "pointer",
-                          transition: "transform 0.2s ease",
                         }}
-                      />
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setShowColorPicker(!showColorPicker)}
-                    style={{
-                      padding: "8px 12px",
-                      backgroundColor: "#f0f0f0",
-                      border: "1px solid #ccc",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      display: showColorPicker ? "none" : "block",
-                    }}
-                  >
-                    Custom Color
-                  </button>
-                  <div 
-                    style={{ 
-                      position: "absolute", 
-                      top: "100%", 
-                      left: 0, 
-                      marginTop: "10px",
-                      opacity: showColorPicker && selectedPixelInfo ? 1 : 0,
-                      transition: "opacity 0.3s ease-out",
-                      pointerEvents: showColorPicker && selectedPixelInfo ? "auto" : "none",
-                    }}
-                  >
-                    <HexColorPicker 
-                      color={selectedPixelInfo?.color || selectedColor} 
-                      onChange={(color) => {
-                        if (selectedPixelInfo) {
-                          const updatedPixels = selectedPixelsRef.current.map(p => 
-                            p.x === selectedPixelInfo.x && p.y === selectedPixelInfo.y 
-                              ? { ...p, color } 
-                              : p
-                          );
-                          selectedPixelsRef.current = updatedPixels;
-                          setSelectedPixels(updatedPixels);
-                          triggerDraw();
-                        }
-                      }} 
-                    />
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowColorPicker(false);
-                      setSelectedPixelInfo(null);
-                    }}
-                    style={{
-                      padding: "8px 12px",
-                      backgroundColor: "#f0f0f0",
-                      border: "1px solid #ccc",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Close
-                  </button>
-                </div>
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
 
+              {/* Payment Summary */}
               <div style={{ 
                 padding: "15px", 
                 backgroundColor: "#f8f9fa", 
@@ -1294,24 +1295,58 @@ export default function PixelCanvas() {
                 marginBottom: "20px"
               }}>
                 <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-                  <span>Pixels ({selectedPixelsRef.current.length}):</span>
-                  <span>${(selectedPixelsRef.current.length * minPrice).toFixed(2)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-                  <span>Processing Fee:</span>
-                  <span>${processingFee.toFixed(2)}</span>
+                <div style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}>
+                  {selectedPixelsRef.current.map((pixel, index) => {
+                    const existingPixel = existingPixels.find(p => p.x === pixel.x && p.y === pixel.y);
+                    const price = existingPixel ? existingPixel.price + minPrice : minPrice;
+                    return (
+                      <div key={`${pixel.x}-${pixel.y}`} style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 100px",
+                        gap: "10px",
+                        padding: "8px",
+                        backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
+                        borderRadius: "4px",
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div style={{
+                            width: "20px",
+                            height: "20px",
+                            backgroundColor: pixel.color,
+                            border: "1px solid #ccc",
+                            borderRadius: "4px",
+                          }} />
+                          <span>Pixel ({pixel.x}, {pixel.y})</span>
+                        </div>
+                        <span style={{ textAlign: "right" }}>${price.toFixed(2)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div style={{ 
-                  display: "flex", 
-                  justifyContent: "space-between", 
+                  display: "grid", 
+                  gridTemplateColumns: "1fr 100px",
+                  gap: "10px",
+                  marginBottom: "5px" 
+                }}>
+                  <span>Processing Fee:</span>
+                  <span style={{ textAlign: "right" }}>${processingFee.toFixed(2)}</span>
+                </div>
+                <div style={{ 
+                  display: "grid", 
+                  gridTemplateColumns: "1fr 100px",
+                  gap: "10px",
                   marginTop: "10px",
                   paddingTop: "10px",
                   borderTop: "1px solid #e9ecef",
                   fontWeight: "bold"
                 }}>
                   <span>Total:</span>
-                  <span>${(selectedPixelsRef.current.length * minPrice + processingFee).toFixed(2)}</span>
+                  <span style={{ textAlign: "right" }}>
+                    ${(existingPixels.reduce((sum: number, pixel) => sum + (pixel.price + minPrice), 0) + 
+                      (selectedPixelsRef.current.length - existingPixels.length) * minPrice + 
+                      processingFee).toFixed(2)}
+                  </span>
                 </div>
               </div>
 
@@ -1528,20 +1563,26 @@ export default function PixelCanvas() {
                     <span>Pixel Price:</span>
                     <span>${bidAmount.toFixed(2)}</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                  <div style={{ 
+                    display: "grid", 
+                    gridTemplateColumns: "1fr 100px",
+                    gap: "10px",
+                    marginBottom: "5px" 
+                  }}>
                     <span>Processing Fee:</span>
-                    <span>${processingFee.toFixed(2)}</span>
+                    <span style={{ textAlign: "right" }}>${processingFee.toFixed(2)}</span>
                   </div>
                   <div style={{ 
-                    display: "flex", 
-                    justifyContent: "space-between", 
+                    display: "grid", 
+                    gridTemplateColumns: "1fr 100px",
+                    gap: "10px",
                     marginTop: "10px",
                     paddingTop: "10px",
                     borderTop: "1px solid #e9ecef",
                     fontWeight: "bold"
                   }}>
                     <span>Total:</span>
-                    <span>${(bidAmount + processingFee).toFixed(2)}</span>
+                    <span style={{ textAlign: "right" }}>${(bidAmount + processingFee).toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -1812,13 +1853,37 @@ export default function PixelCanvas() {
               marginBottom: "20px"
             }}>
               <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-                <span>Pixels ({selectedPixelsRef.current.length}):</span>
-                <span>${(selectedPixelsRef.current.length * minPrice).toFixed(2)}</span>
+              <div style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}>
+                {selectedPixelsRef.current.map((pixel, index) => {
+                  const existingPixel = existingPixels.find(p => p.x === pixel.x && p.y === pixel.y);
+                  const price = existingPixel ? existingPixel.price + minPrice : minPrice;
+                  return (
+                    <div key={`${pixel.x}-${pixel.y}`} style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 100px",
+                      gap: "10px",
+                      padding: "8px",
+                      backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
+                      borderRadius: "4px",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div style={{
+                          width: "20px",
+                          height: "20px",
+                          backgroundColor: pixel.color,
+                          border: "1px solid #ccc",
+                          borderRadius: "4px",
+                        }} />
+                        <span>Pixel ({pixel.x}, {pixel.y})</span>
+                      </div>
+                      <span style={{ textAlign: "right" }}>${price.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
                 <span>Processing Fee:</span>
-                <span>${processingFee.toFixed(2)}</span>
+                <span style={{ textAlign: "right" }}>${processingFee.toFixed(2)}</span>
               </div>
               <div style={{ 
                 display: "flex", 
@@ -1829,7 +1894,11 @@ export default function PixelCanvas() {
                 fontWeight: "bold"
               }}>
                 <span>Total:</span>
-                <span>${(selectedPixelsRef.current.length * minPrice + processingFee).toFixed(2)}</span>
+                <span style={{ textAlign: "right" }}>
+                  ${(existingPixels.reduce((sum: number, pixel) => sum + (pixel.price + minPrice), 0) + 
+                    (selectedPixelsRef.current.length - existingPixels.length) * minPrice + 
+                    processingFee).toFixed(2)}
+                </span>
               </div>
             </div>
 
@@ -1848,6 +1917,87 @@ export default function PixelCanvas() {
               />
             </Elements>
           </div>
+        </div>
+      )}
+
+      {/* Color Picker for Selected Pixel */}
+      {showColorPickerForSelected && selectedPixelInfo && (
+        <div 
+          style={{ 
+            position: "absolute",
+            top: "16%",
+            left: "77%",
+            backgroundColor: "white",
+            padding: "20px",
+            borderRadius: "8px",
+            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+            zIndex: 1000,
+            animation: "slideIn 0.3s ease-out",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+            minWidth: "200px"
+          }}
+        >
+          <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", maxWidth: "200px" }}>
+            {COLORS.map((color) => (
+              <div
+                key={color}
+                onClick={() => {
+                  const updatedPixels = selectedPixelsRef.current.map(p => {
+                    if (p.x === selectedPixelInfo.x && p.y === selectedPixelInfo.y) {
+                      return { ...p, color };
+                    }
+                    return p;
+                  });
+                  selectedPixelsRef.current = updatedPixels;
+                  setSelectedPixels(updatedPixels);
+                  setSelectedPixelInfo({ ...selectedPixelInfo, color });
+                  triggerDraw();
+                }}
+                style={{
+                  width: "25px",
+                  height: "25px",
+                  backgroundColor: color,
+                  border: color === selectedPixelInfo.color ? "2px solid #000" : "1px solid #ccc",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  transition: "transform 0.2s ease",
+                  transform: color === selectedPixelInfo.color ? "scale(1.1)" : "scale(1)",
+                }}
+              />
+            ))}
+          </div>
+          <HexColorPicker 
+            color={selectedPixelInfo.color} 
+            onChange={(color) => {
+              const updatedPixels = selectedPixelsRef.current.map(p => {
+                if (p.x === selectedPixelInfo.x && p.y === selectedPixelInfo.y) {
+                  return { ...p, color };
+                }
+                return p;
+              });
+              selectedPixelsRef.current = updatedPixels;
+              setSelectedPixels(updatedPixels);
+              setSelectedPixelInfo({ ...selectedPixelInfo, color });
+              triggerDraw();
+            }}
+          />
+          <button
+            onClick={() => {
+              setShowColorPickerForSelected(false);
+              setSelectedPixelInfo(null);
+            }}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#f0f0f0",
+              border: "1px solid #ccc",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Close
+          </button>
         </div>
       )}
 
