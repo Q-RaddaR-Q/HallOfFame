@@ -3,6 +3,7 @@ const router = express.Router();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Pixel = require('../models/Pixel');
 const { PIXEL_CONFIG } = require('../config/constants');
+const { Op } = require('sequelize');
 
 // Create a payment intent for coloring pixels
 router.post('/create-payment-intent', async (req, res) => {
@@ -232,29 +233,80 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentData);
 
     // Store the pixel data in our database with the payment intent ID
-    await Pixel.bulkCreate(
-      pixels.map(pixel => ({
-        x: pixel.x,
-        y: pixel.y,
-        color: pixel.color,
-        price: pixel.price,
-        ownerId,
-        ownerName,
-        paymentIntentId: paymentIntent.id,
-        lastUpdated: new Date()
-      }))
-    );
+    try {
+      // First check which pixels already exist
+      const existingPixels = await Pixel.findAll({
+        where: {
+          [Op.or]: pixels.map(pixel => ({
+            x: pixel.x,
+            y: pixel.y
+          }))
+        }
+      });
 
-    console.log('Bulk payment intent created successfully:', {
-      id: paymentIntent.id,
-      clientSecret: paymentIntent.client_secret,
-      status: paymentIntent.status
-    });
+      // Create a map of existing pixels for quick lookup
+      const existingPixelMap = new Map(
+        existingPixels.map(pixel => [`${pixel.x},${pixel.y}`, pixel])
+      );
 
-    // Return only the client secret
-    res.json({
-      clientSecret: paymentIntent.client_secret
-    });
+      // Separate pixels into new and existing
+      const newPixels = [];
+      const pixelsToUpdate = [];
+
+      for (const pixel of pixels) {
+        const key = `${pixel.x},${pixel.y}`;
+        if (existingPixelMap.has(key)) {
+          pixelsToUpdate.push({
+            pixel: existingPixelMap.get(key),
+            newData: {
+              color: pixel.color,
+              price: pixel.price,
+              ownerId,
+              ownerName,
+              paymentIntentId: paymentIntent.id,
+              lastUpdated: new Date()
+            }
+          });
+        } else {
+          newPixels.push({
+            x: pixel.x,
+            y: pixel.y,
+            color: pixel.color,
+            price: pixel.price,
+            ownerId,
+            ownerName,
+            paymentIntentId: paymentIntent.id,
+            lastUpdated: new Date()
+          });
+        }
+      }
+
+      // Create new pixels
+      if (newPixels.length > 0) {
+        await Pixel.bulkCreate(newPixels);
+      }
+
+      // Update existing pixels
+      for (const { pixel, newData } of pixelsToUpdate) {
+        await pixel.update(newData);
+      }
+
+      console.log('Bulk payment intent created successfully:', {
+        id: paymentIntent.id,
+        clientSecret: paymentIntent.client_secret,
+        status: paymentIntent.status,
+        newPixels: newPixels.length,
+        updatedPixels: pixelsToUpdate.length
+      });
+
+      // Return only the client secret
+      res.json({
+        clientSecret: paymentIntent.client_secret
+      });
+    } catch (err) {
+      console.error('Error storing pixel data:', err);
+      res.status(500).json({ error: 'Error storing pixel data' });
+    }
   } catch (err) {
     console.error('=== Bulk Payment Intent Creation Error ===');
     console.error('Error details:', {
