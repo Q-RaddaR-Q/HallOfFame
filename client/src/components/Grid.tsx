@@ -584,11 +584,8 @@ export default function PixelCanvas() {
     for (const pixel of selectedPixelsRef.current) {
       const { x, y, color } = pixel;
       if (x >= viewLeft && x <= viewRight && y >= viewTop && y <= viewBottom) {
-        // Convert hex color to RGB and add transparency
-        const r = parseInt(color.slice(1, 3), 16);
-        const g = parseInt(color.slice(3, 5), 16);
-        const b = parseInt(color.slice(5, 7), 16);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.5)`;
+        // Draw the selected color
+        ctx.fillStyle = color;
         ctx.fillRect(x, y, 1, 1);
       }
     }
