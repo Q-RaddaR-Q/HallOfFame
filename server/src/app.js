@@ -11,9 +11,18 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+
+// Regular JSON middleware for all routes except webhook
+app.use((req, res, next) => {
+  if (req.originalUrl === '/api/payments/webhook') {
+    next();
+  } else {
+    express.json()(req, res, next);
+  }
+});
 
 // Routes
+app.use('/api/payments', require('./routes/payments'));
 app.use('/api/pixels', require('./routes/pixels'));
 
 // Error handling middleware
@@ -22,34 +31,21 @@ app.use((err, req, res, next) => {
   res.status(500).send('Something broke!');
 });
 
-// Database connection and server start
+// Start server
 const PORT = process.env.PORT || 5000;
 
-async function startServer() {
-  try {
-    // Sync database to update schema without dropping tables
-    // await sequelize.sync({ alter: true });
-    // console.log('Database synced successfully');
-
-    // Start server
-    const server = app.listen(PORT, () => {
+// Sync database and start server
+sequelize.sync({ force: false })
+  .then(() => {
+    app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
+      console.log('Webhook endpoint:', `http://localhost:${PORT}/api/payments/webhook`);
     });
-
-    // Handle server errors
-    server.on('error', (error) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`Port ${PORT} is already in use. Please try a different port.`);
-        process.exit(1);
-      } else {
-        console.error('Server error:', error);
-      }
-    });
-  } catch (error) {
-    console.error('Unable to start server:', error);
+  })
+  .catch(error => {
+    console.error('Unable to sync database:', error);
     process.exit(1);
-  }
-}
+  });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
@@ -62,5 +58,3 @@ process.on('unhandledRejection', (error) => {
   console.error('Unhandled Rejection:', error);
   process.exit(1);
 });
-
-startServer(); 
