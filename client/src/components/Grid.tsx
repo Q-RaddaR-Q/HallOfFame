@@ -752,24 +752,16 @@ export default function PixelCanvas() {
           setPendingPixel({ x: gridX, y: gridY });
           setShowChoiceModal(true);
         }
-      } else {
+      } else if (mode === "view") {
         // In view mode, show pixel info
         pixelService.getPixel(gridX, gridY)
           .then(pixel => {
-            setSelectedPixelInfo({
-              x: pixel.x,
-              y: pixel.y,
-              color: pixel.color,
-              price: 0,
-              ownerId: '',
-              ownerName: '',
-              lastUpdated: new Date().toISOString()
-            });
-            setShowColorPicker(true);
+            setSelectedPixelInfo(pixel);
+            setShowPixelInfo(true);
           })
           .catch(() => {
             setSelectedPixelInfo(null);
-            setShowColorPicker(false);
+            setShowPixelInfo(false);
           });
       }
     }
