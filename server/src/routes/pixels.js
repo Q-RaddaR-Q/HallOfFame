@@ -230,6 +230,36 @@ router.put('/:x/:y', async (req, res) => {
   }
 });
 
+// Update pixel link
+router.put('/:x/:y/link', async (req, res) => {
+  try {
+    const x = parseInt(req.params.x, 10);
+    const y = parseInt(req.params.y, 10);
+    const { link } = req.body;
+    
+    if (isNaN(x) || isNaN(y)) {
+      return res.status(400).json({ message: 'Invalid coordinates' });
+    }
+
+    const pixel = await Pixel.findOne({
+      where: { x, y }
+    });
+    
+    if (!pixel) {
+      return res.status(404).json({ message: 'Pixel not found' });
+    }
+
+    // Update the link
+    pixel.link = link;
+    await pixel.save();
+    
+    res.json(pixel);
+  } catch (err) {
+    console.error('Error updating pixel link:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Helper function to get configuration
 async function getConfig() {
   return PIXEL_CONFIG;

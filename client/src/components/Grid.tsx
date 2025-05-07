@@ -44,11 +44,11 @@ function PaymentForm({
 }) {
   const stripe = useStripe();
   const elements = useElements();
+  const [link, setLink] = useState('');
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!stripe || !elements) {
-      console.error('Stripe or Elements not initialized:', { stripe, elements });
       return;
     }
 
@@ -71,8 +71,6 @@ function PaymentForm({
         ownerName
       );
 
-      console.log('Payment intent created with client secret:', clientSecret);
-
       // Confirm the payment
       const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(
         clientSecret,
@@ -87,18 +85,19 @@ function PaymentForm({
       );
 
       if (confirmError) {
-        console.error('Payment confirmation error:', confirmError);
         throw new Error(confirmError.message);
       }
 
-      console.log('Payment intent status:', paymentIntent?.status);
       if (paymentIntent && paymentIntent.status === 'succeeded') {
+        // If there's a link and bid is over $50, update the pixel link
+        if (link && bidAmount >= 50) {
+          await pixelService.updatePixelLink(pendingPixel!.x, pendingPixel!.y, link);
+        }
         onSuccess();
       } else {
         throw new Error('Payment was not successful');
       }
     } catch (error) {
-      console.error('Error processing payment:', error);
       alert(error instanceof Error ? error.message : 'Failed to process payment. Please try again.');
     } finally {
       setIsProcessing(false);
@@ -135,6 +134,36 @@ function PaymentForm({
           />
         </div>
       </div>
+
+      {/* Add link input if bid is over $50 */}
+      {bidAmount >= 50 && (
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ display: 'block', marginBottom: '8px' }}>
+            Link (optional):
+          </label>
+          <input
+            type="url"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="https://example.com"
+            style={{
+              width: '100%',
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #ccc',
+            }}
+          />
+          <p style={{ 
+            fontSize: '12px', 
+            color: '#666',
+            marginTop: '4px',
+            marginBottom: 0
+          }}>
+            Link will be added to your pixel
+          </p>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
         <button
           type="button"
@@ -437,6 +466,7 @@ export default function PixelCanvas() {
   const [showBulkPaymentForm, setShowBulkPaymentForm] = useState(false);
   const [pixelPrices, setPixelPrices] = useState<Map<string, number>>(new Map());
   const [existingPixels, setExistingPixels] = useState<Array<{ x: number; y: number; price: number }>>([]);
+  const [bulkLink, setBulkLink] = useState('');
 
   // Add ref for selected pixels
   const selectedPixelsRef = useRef<Array<{ x: number; y: number; color: string }>>([]);
@@ -832,25 +862,22 @@ export default function PixelCanvas() {
 
     setIsProcessingPayment(true);
     try {
-      // Calculate total amount based on individual pixel prices
       const totalAmount = Array.from(pixelPrices.values()).reduce((sum, price) => {
-        return sum + price; // Use the price directly as it already includes minPrice
+        return sum + price;
       }, 0);
 
-      // Create a bulk payment intent with the total amount
       const { clientSecret } = await pixelService.createBulkPaymentIntent(
         selectedPixelsRef.current.map(pixel => ({
           x: pixel.x,
           y: pixel.y,
           color: pixel.color,
-          price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice // Include the price for each pixel
+          price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice
         })),
         totalAmount,
         getOrCreateBrowserId(),
         ownerName
       );
 
-      // Confirm the payment
       const { error: confirmError, paymentIntent } = await stripe?.confirmCardPayment(
         clientSecret,
         {
@@ -868,7 +895,6 @@ export default function PixelCanvas() {
       }
 
       if (paymentIntent && paymentIntent.status === 'succeeded') {
-        // Update all selected pixels
         for (const pixel of selectedPixelsRef.current) {
           const updatedPixel = await pixelService.getPixel(pixel.x, pixel.y);
           if (updatedPixel) {
@@ -884,7 +910,6 @@ export default function PixelCanvas() {
         throw new Error('Payment was not successful');
       }
     } catch (error) {
-      console.error('Error processing payment:', error);
       alert(error instanceof Error ? error.message : 'Failed to process payment. Please try again.');
     } finally {
       setIsProcessingPayment(false);
@@ -896,6 +921,13 @@ export default function PixelCanvas() {
       // Wait for a short delay to allow the webhook to process
       await new Promise(resolve => setTimeout(resolve, 2000));
       
+      // Update all selected pixels with the link if provided
+      if (bulkLink) {
+        for (const pixel of selectedPixelsRef.current) {
+          await pixelService.updatePixelLink(pixel.x, pixel.y, bulkLink);
+        }
+      }
+
       // Update all selected pixels
       for (const pixel of selectedPixelsRef.current) {
         const updatedPixel = await pixelService.getPixel(pixel.x, pixel.y);
@@ -904,9 +936,10 @@ export default function PixelCanvas() {
         }
       }
 
-      // Clear the selection
+      // Clear the selection and link
       selectedPixelsRef.current = [];
       setSelectedPixels([]);
+      setBulkLink('');
       setShowBulkPaymentForm(false);
       setBulkPaymentIntent(null);
       triggerDraw();
@@ -1029,6 +1062,12 @@ export default function PixelCanvas() {
       setExistingPixels([]);
     }
   }, [selectedPixelsRef.current]);
+
+  // Add a function to calculate total price
+  const calculateTotalPrice = () => {
+    return existingPixels.reduce((sum: number, pixel) => sum + (pixel.price + minPrice), 0) + 
+      (selectedPixelsRef.current.length - existingPixels.length) * minPrice;
+  };
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
@@ -1159,187 +1198,232 @@ export default function PixelCanvas() {
               boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
               maxWidth: "300px",
               position: "relative",
+              maxHeight: "calc(100vh - 100px)", // Limit height to viewport height minus some space
+              display: "flex",
+              flexDirection: "column",
             }}>
               <h3 style={{ marginBottom: "15px", fontSize: "18px" }}>
                 Selected Pixels ({selectedPixelsRef.current.length})
               </h3>
 
-              {/* Name Input Field */}
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ display: "block", marginBottom: "8px" }}>
-                  Your Name:
-                </label>
-                <input
-                  type="text"
-                  value={ownerName}
-                  onChange={(e) => {
-                    setOwnerName(e.target.value);
-                    setNameValidationAttempted(false);
-                  }}
-                  placeholder="Enter your name"
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: "4px",
-                    border: `1px solid ${nameValidationAttempted && !ownerName.trim() ? "#ff0000" : "#ccc"}`,
-                    boxSizing: "border-box",
-                    backgroundColor: nameValidationAttempted && !ownerName.trim() ? "#fff5f5" : "white"
-                  }}
-                />
-                {nameValidationAttempted && !ownerName.trim() && (
-                  <p style={{ 
-                    color: "#ff0000", 
-                    fontSize: "12px", 
-                    marginTop: "4px",
-                    marginBottom: 0
-                  }}>
-                    Please enter your name to claim ownership of these pixels
-                  </p>
-                )}
-              </div>
-              
-              <div style={{ 
-                maxHeight: "200px", 
+              {/* Scrollable content area */}
+              <div style={{
+                flex: 1,
                 overflowY: "auto",
-                marginBottom: "20px",
-                border: "1px solid #e0e0e0",
-                borderRadius: "8px",
-                padding: "10px"
+                marginBottom: "15px",
+                paddingRight: "5px", // Add some padding for the scrollbar
               }}>
-                {selectedPixelsRef.current.map((pixel, index) => {
-                  const price = pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice;
-                  return (
-                    <div key={`${pixel.x}-${pixel.y}`} style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "8px",
-                      backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
+                {/* Name Input Field */}
+                <div style={{ marginBottom: "15px" }}>
+                  <label style={{ display: "block", marginBottom: "8px" }}>
+                    Your Name:
+                  </label>
+                  <input
+                    type="text"
+                    value={ownerName}
+                    onChange={(e) => {
+                      setOwnerName(e.target.value);
+                      setNameValidationAttempted(false);
+                    }}
+                    placeholder="Enter your name"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
                       borderRadius: "4px",
+                      border: `1px solid ${nameValidationAttempted && !ownerName.trim() ? "#ff0000" : "#ccc"}`,
+                      boxSizing: "border-box",
+                      backgroundColor: nameValidationAttempted && !ownerName.trim() ? "#fff5f5" : "white"
+                    }}
+                  />
+                  {nameValidationAttempted && !ownerName.trim() && (
+                    <p style={{ 
+                      color: "#ff0000", 
+                      fontSize: "12px", 
+                      marginTop: "4px",
+                      marginBottom: 0
                     }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <div 
-                          onClick={() => {
-                            setSelectedPixelInfo({
-                              x: pixel.x,
-                              y: pixel.y,
-                              color: pixel.color,
-                              price: price,
-                              ownerId: '',
-                              ownerName: '',
-                              lastUpdated: new Date().toISOString()
-                            });
-                            setShowColorPickerForSelected(true);
-                            setShowColorPicker(false);
-                          }}
-                          style={{
-                            width: "20px",
-                            height: "20px",
-                            backgroundColor: pixel.color,
-                            border: "1px solid #ccc",
-                            borderRadius: "4px",
-                            cursor: "pointer",
-                            transition: "transform 0.2s ease",
-                          }}
-                          title="Click to change color"
-                        />
-                        <div>
-                          <div>Position: ({pixel.x}, {pixel.y})</div>
-                          <div style={{ fontSize: "12px", color: "#666" }}>
-                            Price: ${price.toFixed(2)}
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const index = selectedPixelsRef.current.findIndex(p => p.x === pixel.x && p.y === pixel.y);
-                          if (index !== -1) {
-                            selectedPixelsRef.current = selectedPixelsRef.current.filter((_, i) => i !== index);
-                            setSelectedPixels(selectedPixelsRef.current);
-                            triggerDraw();
-                          }
-                        }}
-                        style={{
-                          padding: "4px 8px",
-                          backgroundColor: "#ff4444",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                      Please enter your name to claim ownership of these pixels
+                    </p>
+                  )}
+                </div>
 
-              {/* Payment Summary */}
-              <div style={{ 
-                padding: "15px", 
-                backgroundColor: "#f8f9fa", 
-                borderRadius: "8px",
-                border: "1px solid #e9ecef",
-                marginBottom: "20px"
-              }}>
-                <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
-                <div style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}>
+                {/* Add link input for bulk selection only if total price >= $50 */}
+                {selectedPixelsRef.current.length > 0 && calculateTotalPrice() >= 50 && (
+                  <div style={{ marginBottom: "20px" }}>
+                    <label style={{ display: "block", marginBottom: "8px" }}>
+                      Link (optional):
+                    </label>
+                    <input
+                      type="url"
+                      value={bulkLink}
+                      onChange={(e) => setBulkLink(e.target.value)}
+                      placeholder="https://example.com"
+                      style={{
+                        width: "100%",
+                        padding: "8px",
+                        borderRadius: "4px",
+                        border: "1px solid #ccc",
+                      }}
+                    />
+                    <p style={{ 
+                      fontSize: "12px", 
+                      color: "#666",
+                      marginTop: "4px",
+                      marginBottom: 0
+                    }}>
+                      Link will be added to all selected pixels
+                    </p>
+                  </div>
+                )}
+
+                <div style={{ 
+                  maxHeight: "200px", 
+                  overflowY: "auto",
+                  marginBottom: "20px",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: "8px",
+                  padding: "10px"
+                }}>
                   {selectedPixelsRef.current.map((pixel, index) => {
-                    const existingPixel = existingPixels.find(p => p.x === pixel.x && p.y === pixel.y);
-                    const price = existingPixel ? existingPixel.price + minPrice : minPrice;
+                    const price = pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice;
                     return (
                       <div key={`${pixel.x}-${pixel.y}`} style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 100px",
-                        gap: "10px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
                         padding: "8px",
                         backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
                         borderRadius: "4px",
                       }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                          <div style={{
-                            width: "20px",
-                            height: "20px",
-                            backgroundColor: pixel.color,
-                            border: "1px solid #ccc",
-                            borderRadius: "4px",
-                          }} />
-                          <span>Pixel ({pixel.x}, {pixel.y})</span>
+                          <div 
+                            onClick={async () => {
+                              try {
+                                const pixelData = await pixelService.getPixel(pixel.x, pixel.y);
+                                setSelectedPixelInfo(pixelData);
+                                setShowColorPickerForSelected(true);
+                                setShowColorPicker(false);
+                              } catch (error) {
+                                console.error('Error fetching pixel data:', error);
+                              }
+                            }}
+                            style={{
+                              width: "20px",
+                              height: "20px",
+                              backgroundColor: pixel.color,
+                              border: "1px solid #ccc",
+                              borderRadius: "4px",
+                              cursor: "pointer",
+                              transition: "transform 0.2s ease",
+                            }}
+                            title="Click to change color"
+                          />
+                          <div>
+                            <div>Position: ({pixel.x}, {pixel.y})</div>
+                            <div style={{ fontSize: "12px", color: "#666" }}>
+                              Price: ${price.toFixed(2)}
+                            </div>
+                          </div>
                         </div>
-                        <span style={{ textAlign: "right" }}>${price.toFixed(2)}</span>
+                        <button
+                          onClick={() => {
+                            const index = selectedPixelsRef.current.findIndex(p => p.x === pixel.x && p.y === pixel.y);
+                            if (index !== -1) {
+                              selectedPixelsRef.current = selectedPixelsRef.current.filter((_, i) => i !== index);
+                              setSelectedPixels(selectedPixelsRef.current);
+                              triggerDraw();
+                            }
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            backgroundColor: "#ff4444",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Remove
+                        </button>
                       </div>
                     );
                   })}
                 </div>
+
+                {/* Payment Summary */}
                 <div style={{ 
-                  display: "grid", 
-                  gridTemplateColumns: "1fr 100px",
-                  gap: "10px",
-                  marginBottom: "5px" 
+                  padding: "15px", 
+                  backgroundColor: "#f8f9fa", 
+                  borderRadius: "8px",
+                  border: "1px solid #e9ecef",
+                  marginBottom: "20px"
                 }}>
-                  <span>Processing Fee:</span>
-                  <span style={{ textAlign: "right" }}>${processingFee.toFixed(2)}</span>
-                </div>
-                <div style={{ 
-                  display: "grid", 
-                  gridTemplateColumns: "1fr 100px",
-                  gap: "10px",
-                  marginTop: "10px",
-                  paddingTop: "10px",
-                  borderTop: "1px solid #e9ecef",
-                  fontWeight: "bold"
-                }}>
-                  <span>Total:</span>
-                  <span style={{ textAlign: "right" }}>
-                    ${(existingPixels.reduce((sum: number, pixel) => sum + (pixel.price + minPrice), 0) + 
-                      (selectedPixelsRef.current.length - existingPixels.length) * minPrice + 
-                      processingFee).toFixed(2)}
-                  </span>
+                  <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
+                  <div style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}>
+                    {selectedPixelsRef.current.map((pixel, index) => {
+                      const existingPixel = existingPixels.find(p => p.x === pixel.x && p.y === pixel.y);
+                      const price = existingPixel ? existingPixel.price + minPrice : minPrice;
+                      return (
+                        <div key={`${pixel.x}-${pixel.y}`} style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 100px",
+                          gap: "10px",
+                          padding: "8px",
+                          backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
+                          borderRadius: "4px",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <div style={{
+                              width: "20px",
+                              height: "20px",
+                              backgroundColor: pixel.color,
+                              border: "1px solid #ccc",
+                              borderRadius: "4px",
+                            }} />
+                            <span>Pixel ({pixel.x}, {pixel.y})</span>
+                          </div>
+                          <span style={{ textAlign: "right" }}>${price.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ 
+                    display: "grid", 
+                    gridTemplateColumns: "1fr 100px",
+                    gap: "10px",
+                    marginBottom: "5px" 
+                  }}>
+                    <span>Processing Fee:</span>
+                    <span style={{ textAlign: "right" }}>${processingFee.toFixed(2)}</span>
+                  </div>
+                  <div style={{ 
+                    display: "grid", 
+                    gridTemplateColumns: "1fr 100px",
+                    gap: "10px",
+                    marginTop: "10px",
+                    paddingTop: "10px",
+                    borderTop: "1px solid #e9ecef",
+                    fontWeight: "bold"
+                  }}>
+                    <span>Total:</span>
+                    <span style={{ textAlign: "right" }}>
+                      ${(existingPixels.reduce((sum: number, pixel) => sum + (pixel.price + minPrice), 0) + 
+                        (selectedPixelsRef.current.length - existingPixels.length) * minPrice + 
+                        processingFee).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              {/* Fixed bottom buttons */}
+              <div style={{ 
+                display: "flex", 
+                gap: "10px", 
+                justifyContent: "flex-end",
+                paddingTop: "15px",
+                borderTop: "1px solid #e0e0e0",
+                backgroundColor: "rgba(255, 255, 255, 0.9)",
+              }}>
                 <button
                   onClick={() => {
                     selectedPixelsRef.current = [];
@@ -1779,9 +1863,22 @@ export default function PixelCanvas() {
                   border: "1px solid #ccc",
                 }} />
               </p>
-              <p><strong>Owner:</strong> {selectedPixelInfo.ownerName || "Unknown"}</p>
+              <p><strong>Owner:</strong> {selectedPixelInfo.ownerName || "Unclaimed"}</p>
               <p><strong>Price:</strong> ${selectedPixelInfo.price.toFixed(2)}</p>
               <p><strong>Last Updated:</strong> {new Date(selectedPixelInfo.lastUpdated).toLocaleString()}</p>
+              {selectedPixelInfo.link && (
+                <p>
+                  <strong>Link:</strong>{" "}
+                  <a 
+                    href={selectedPixelInfo.link} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    style={{ color: "#0066cc", textDecoration: "underline" }}
+                  >
+                    {selectedPixelInfo.link}
+                  </a>
+                </p>
+              )}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
