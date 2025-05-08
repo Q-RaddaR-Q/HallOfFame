@@ -43,7 +43,7 @@ router.get('/:x/:y', async (req, res) => {
 // Create or update pixel with payment
 router.post('/', async (req, res) => {
   try {
-    const { color, price, ownerId, paymentIntentId, ownerName } = req.body;
+    const { color, price, ownerId, paymentIntentId, ownerName, link } = req.body;
     const x = parseInt(req.body.x, 10);
     const y = parseInt(req.body.y, 10);
 
@@ -95,7 +95,7 @@ router.post('/', async (req, res) => {
     // Update or create the pixel
     const [pixel, created] = await Pixel.findOrCreate({
       where: { x, y },
-      defaults: { color, price, ownerId, ownerName }
+      defaults: { color, price, ownerId, ownerName, link }
     });
 
     if (!created) {
@@ -103,6 +103,9 @@ router.post('/', async (req, res) => {
       pixel.price = price;
       pixel.ownerId = ownerId;
       pixel.ownerName = ownerName;
+      if (link) {
+        pixel.link = link;
+      }
       pixel.lastUpdated = new Date();
       await pixel.save();
     }
@@ -227,6 +230,36 @@ router.put('/:x/:y', async (req, res) => {
     // ... rest of the function ...
   } catch (error) {
     // ... error handling ...
+  }
+});
+
+// Update pixel link
+router.put('/:x/:y/link', async (req, res) => {
+  try {
+    const x = parseInt(req.params.x, 10);
+    const y = parseInt(req.params.y, 10);
+    const { link } = req.body;
+    
+    if (isNaN(x) || isNaN(y)) {
+      return res.status(400).json({ message: 'Invalid coordinates' });
+    }
+
+    const pixel = await Pixel.findOne({
+      where: { x, y }
+    });
+    
+    if (!pixel) {
+      return res.status(404).json({ message: 'Pixel not found' });
+    }
+
+    // Update the link
+    pixel.link = link;
+    await pixel.save();
+    
+    res.json(pixel);
+  } catch (err) {
+    console.error('Error updating pixel link:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

@@ -9,6 +9,7 @@ export interface Pixel {
   price: number;
   ownerId: string | null;
   ownerName: string | null;
+  link: string | null;
   lastUpdated: string;
 }
 
@@ -88,10 +89,11 @@ export const pixelService = {
     price: number = 0,
     ownerId: string,
     paymentIntentId?: string,
-    ownerName?: string
+    ownerName?: string,
+    link?: string
   ): Promise<{ pixel?: Pixel; currentPrice?: number }> => {
     try {
-      const requestData = { x, y, color, price, ownerId, paymentIntentId, ownerName };
+      const requestData = { x, y, color, price, ownerId, paymentIntentId, ownerName, link };
       console.log('Updating pixel with:', requestData);
       
       const response = await axios.post<{ pixel?: Pixel; currentPrice?: number }>(
@@ -159,6 +161,12 @@ export const pixelService = {
   // Handle successful bulk payment
   handleBulkPaymentSuccess: async (paymentData: BulkPaymentData): Promise<Pixel[]> => {
     const response = await axios.post<Pixel[]>(`${API_URL}/pixels/bulk-payment-success`, paymentData);
+    return response.data;
+  },
+
+  // Update pixel link
+  updatePixelLink: async (x: number, y: number, link: string): Promise<Pixel> => {
+    const response = await axios.put<Pixel>(`${API_URL}/pixels/${x}/${y}/link`, { link });
     return response.data;
   }
 }; 

@@ -5,7 +5,7 @@ const fs = require('fs');
 const sequelize = new Sequelize({
   dialect: 'sqlite',
   storage: path.join(__dirname, '../../database.sqlite'),
-  logging: false
+  logging: console.log // Enable logging
 });
 
 async function runMigrations() {
@@ -16,16 +16,25 @@ async function runMigrations() {
       .filter(file => file.endsWith('.js'))
       .sort();
 
+    console.log('Found migration files:', migrationFiles);
+
     // Run each migration
     for (const file of migrationFiles) {
-      console.log(`Running migration: ${file}`);
-      const migration = require(path.join(migrationsPath, file));
-      await migration.up(sequelize.getQueryInterface(), Sequelize);
+      console.log(`\nRunning migration: ${file}`);
+      try {
+        const migration = require(path.join(migrationsPath, file));
+        await migration.up(sequelize.getQueryInterface(), Sequelize);
+        console.log(`Successfully completed migration: ${file}`);
+      } catch (error) {
+        console.error(`Error running migration ${file}:`, error);
+        throw error; // Re-throw to stop the process
+      }
     }
 
-    console.log('All migrations completed successfully');
+    console.log('\nAll migrations completed successfully');
   } catch (error) {
-    console.error('Error running migrations:', error);
+    console.error('\nError running migrations:', error);
+    process.exit(1); // Exit with error code
   } finally {
     await sequelize.close();
   }
