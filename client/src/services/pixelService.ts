@@ -89,10 +89,11 @@ export const pixelService = {
     price: number = 0,
     ownerId: string,
     paymentIntentId?: string,
-    ownerName?: string
+    ownerName?: string,
+    link?: string
   ): Promise<{ pixel?: Pixel; currentPrice?: number }> => {
     try {
-      const requestData = { x, y, color, price, ownerId, paymentIntentId, ownerName };
+      const requestData = { x, y, color, price, ownerId, paymentIntentId, ownerName, link };
       console.log('Updating pixel with:', requestData);
       
       const response = await axios.post<{ pixel?: Pixel; currentPrice?: number }>(

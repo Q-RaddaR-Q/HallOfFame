@@ -48,35 +48,30 @@ function PaymentForm({
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!stripe || !elements) {
-      return;
-    }
-
-    // Validate bid amount
-    const minBid = pendingPixel ? bidAmount : minPrice;
-    if (bidAmount < minBid) {
-      alert(`Your bid must be at least $${minBid.toFixed(2)} to ${pendingPixel ? 'take over this pixel' : 'place a new pixel'}`);
-      return;
-    }
+    if (!stripe || !elements || !pendingPixel) return;
 
     setIsProcessing(true);
     try {
-      // First, create the payment intent
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement) {
+        throw new Error('Card element not found');
+      }
+
+      // Create payment intent first
       const { clientSecret } = await pixelService.createPaymentIntent(
-        pendingPixel!.x,
-        pendingPixel!.y,
+        pendingPixel.x,
+        pendingPixel.y,
         selectedColor,
         bidAmount,
         ownerId,
         ownerName
       );
 
-      // Confirm the payment
-      const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(
+      const { error: paymentError, paymentIntent } = await stripe.confirmCardPayment(
         clientSecret,
         {
           payment_method: {
-            card: elements.getElement(CardElement)!,
+            card: cardElement,
             billing_details: {
               name: ownerName,
             },
@@ -84,15 +79,22 @@ function PaymentForm({
         }
       );
 
-      if (confirmError) {
-        throw new Error(confirmError.message);
+      if (paymentError) {
+        throw new Error(paymentError.message);
       }
 
       if (paymentIntent && paymentIntent.status === 'succeeded') {
-        // If there's a link and bid is over $50, update the pixel link
-        if (link && bidAmount >= 50) {
-          await pixelService.updatePixelLink(pendingPixel!.x, pendingPixel!.y, link);
-        }
+        // Create or update the pixel with the link
+        await pixelService.updatePixel(
+          pendingPixel.x,
+          pendingPixel.y,
+          selectedColor,
+          bidAmount,
+          ownerId,
+          paymentIntent.id,
+          ownerName,
+          link
+        );
         onSuccess();
       } else {
         throw new Error('Payment was not successful');
@@ -106,39 +108,10 @@ function PaymentForm({
 
   return (
     <form onSubmit={handleSubmit} style={{ width: '100%' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <label style={{ display: 'block', marginBottom: '8px' }}>
-          Card Details
-        </label>
-        <div style={{
-          padding: '12px',
-          border: '1px solid #ccc',
-          borderRadius: '4px',
-          backgroundColor: 'white',
-        }}>
-          <CardElement
-            options={{
-              style: {
-                base: {
-                  fontSize: '16px',
-                  color: '#424770',
-                  '::placeholder': {
-                    color: '#aab7c4',
-                  },
-                },
-                invalid: {
-                  color: '#9e2146',
-                },
-              },
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Add link input if bid is over $50 */}
+      {/* Only show link input if bid amount is over $50 */}
       {bidAmount >= 50 && (
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', marginBottom: '8px' }}>
+        <div style={{ marginBottom: "20px" }}>
+          <label style={{ display: "block", marginBottom: "8px" }}>
             Link (optional):
           </label>
           <input
@@ -147,27 +120,37 @@ function PaymentForm({
             onChange={(e) => setLink(e.target.value)}
             placeholder="https://example.com"
             style={{
-              width: '100%',
-              padding: '8px',
-              borderRadius: '4px',
-              border: '1px solid #ccc',
+              width: "100%",
+              padding: "8px",
+              borderRadius: "4px",
+              border: "1px solid #ccc",
             }}
           />
-          <p style={{ 
-            fontSize: '12px', 
-            color: '#666',
-            marginTop: '4px',
-            marginBottom: 0
-          }}>
-            Link will be added to your pixel
-          </p>
         </div>
       )}
-
-      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+      <div style={{ marginBottom: "20px" }}>
+        <CardElement
+          options={{
+            style: {
+              base: {
+                fontSize: '16px',
+                color: '#424770',
+                '::placeholder': {
+                  color: '#aab7c4',
+                },
+              },
+              invalid: {
+                color: '#9e2146',
+              },
+            },
+          }}
+        />
+      </div>
+      <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
         <button
           type="button"
           onClick={onCancel}
+          disabled={isProcessing}
           style={{
             padding: "8px 16px",
             backgroundColor: "#f0f0f0",
@@ -175,12 +158,12 @@ function PaymentForm({
             borderRadius: "6px",
             cursor: "pointer",
           }}
-          disabled={isProcessing}
         >
           Cancel
         </button>
         <button
           type="submit"
+          disabled={!stripe || isProcessing}
           style={{
             padding: "8px 16px",
             backgroundColor: "#4CAF50",
@@ -188,29 +171,10 @@ function PaymentForm({
             border: "none",
             borderRadius: "6px",
             cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
+            opacity: !stripe || isProcessing ? 0.7 : 1,
           }}
-          disabled={!stripe || isProcessing}
         >
-          {isProcessing ? (
-            <>
-              <span className="spinner" style={{
-                width: "16px",
-                height: "16px",
-                border: "2px solid #ffffff",
-                borderTop: "2px solid transparent",
-                borderRadius: "50%",
-                animation: "spin 1s linear infinite",
-              }} />
-              Processing Payment...
-            </>
-          ) : (
-            <>
-              <span>Pay ${amount.toFixed(2)}</span>
-            </>
-          )}
+          {isProcessing ? "Processing..." : `Pay $${amount.toFixed(2)}`}
         </button>
       </div>
     </form>
@@ -296,14 +260,19 @@ const BulkPaymentForm = ({
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!stripe || !elements) {
-      console.error('Stripe or Elements not initialized');
-      return;
-    }
+    if (!stripe || !elements) return;
 
     setIsProcessing(true);
     try {
-      // Create the bulk payment intent with the total amount
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement) {
+        throw new Error('Card element not found');
+      }
+
+      const totalAmount = Array.from(pixelPrices.values()).reduce((sum, price) => {
+        return sum + price;
+      }, 0);
+
       const { clientSecret } = await pixelService.createBulkPaymentIntent(
         selectedPixels.map(pixel => ({
           x: pixel.x,
@@ -316,12 +285,11 @@ const BulkPaymentForm = ({
         ownerName
       );
 
-      // Confirm the payment with Stripe
       const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(
         clientSecret,
         {
           payment_method: {
-            card: elements.getElement(CardElement)!,
+            card: cardElement,
             billing_details: {
               name: ownerName,
             },
@@ -339,7 +307,6 @@ const BulkPaymentForm = ({
         throw new Error('Payment was not successful');
       }
     } catch (error) {
-      console.error('Error processing payment:', error);
       alert(error instanceof Error ? error.message : 'Failed to process payment. Please try again.');
     } finally {
       setIsProcessing(false);
@@ -362,14 +329,14 @@ const BulkPaymentForm = ({
             options={{
               style: {
                 base: {
-                  fontSize: "16px",
-                  color: "#424770",
-                  "::placeholder": {
-                    color: "#aab7c4",
+                  fontSize: '16px',
+                  color: '#424770',
+                  '::placeholder': {
+                    color: '#aab7c4',
                   },
                 },
                 invalid: {
-                  color: "#9e2146",
+                  color: '#9e2146',
                 },
               },
             }}
@@ -857,8 +824,8 @@ export default function PixelCanvas() {
     setShowBulkPaymentForm(true);
   };
 
-  const handleBulkPaymentSubmit = async (cardElement: any) => {
-    if (!cardElement) return;
+  const handleBulkPaymentSubmit = async () => {
+    if (!stripe || !elements) return;
 
     setIsProcessingPayment(true);
     try {
@@ -878,11 +845,11 @@ export default function PixelCanvas() {
         ownerName
       );
 
-      const { error: confirmError, paymentIntent } = await stripe?.confirmCardPayment(
+      const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(
         clientSecret,
         {
           payment_method: {
-            card: cardElement,
+            card: elements.getElement(CardElement)!,
             billing_details: {
               name: ownerName,
             },
