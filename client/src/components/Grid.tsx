@@ -434,6 +434,8 @@ export default function PixelCanvas() {
   const [pixelPrices, setPixelPrices] = useState<Map<string, number>>(new Map());
   const [existingPixels, setExistingPixels] = useState<Array<{ x: number; y: number; price: number }>>([]);
   const [bulkLink, setBulkLink] = useState('');
+  const [hoveredPixel, setHoveredPixel] = useState<Pixel | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
 
   // Add ref for selected pixels
   const selectedPixelsRef = useRef<Array<{ x: number; y: number; color: string }>>([]);
@@ -653,8 +655,25 @@ export default function PixelCanvas() {
 
     if (gridX >= 0 && gridX < WIDTH && gridY >= 0 && gridY < HEIGHT) {
       setMouseGridPos({ x: gridX, y: gridY });
+      // Check if pixel has a link
+      pixelService.getPixel(gridX, gridY)
+        .then(pixel => {
+          if (pixel.link) {
+            setHoveredPixel(pixel);
+            setHoverPosition({ x: e.clientX, y: e.clientY });
+          } else {
+            setHoveredPixel(null);
+            setHoverPosition(null);
+          }
+        })
+        .catch(() => {
+          setHoveredPixel(null);
+          setHoverPosition(null);
+        });
     } else {
       setMouseGridPos(null);
+      setHoveredPixel(null);
+      setHoverPosition(null);
     }
   };
 
@@ -1034,6 +1053,11 @@ export default function PixelCanvas() {
   const calculateTotalPrice = () => {
     return existingPixels.reduce((sum: number, pixel) => sum + (pixel.price + minPrice), 0) + 
       (selectedPixelsRef.current.length - existingPixels.length) * minPrice;
+  };
+
+  const onMouseLeave = () => {
+    setHoveredPixel(null);
+    setHoverPosition(null);
   };
 
   return (
@@ -2054,32 +2078,104 @@ export default function PixelCanvas() {
         </div>
       )}
 
+      {/* Link Hover Popup */}
+      {hoveredPixel && hoverPosition && hoveredPixel.link && (
+        <div
+          style={{
+            position: "fixed",
+            left: hoverPosition.x + 10,
+            top: hoverPosition.y + 10,
+            backgroundColor: "rgba(255, 255, 255, 0.98)",
+            padding: "12px 16px",
+            borderRadius: "8px",
+            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+            zIndex: 1000,
+            pointerEvents: "none",
+            maxWidth: "300px",
+            wordBreak: "break-all",
+            backdropFilter: "blur(8px)",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
+            animation: "popupFadeIn 0.2s ease-out",
+            transform: "translateY(0)",
+            opacity: 1,
+            transition: "all 0.2s ease-out"
+          }}
+        >
+          <div style={{ 
+            fontSize: "14px", 
+            color: "#444",
+            fontWeight: 500,
+            marginBottom: "6px",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px"
+          }}>
+            <span style={{
+              width: "8px",
+              height: "8px",
+              backgroundColor: hoveredPixel.color,
+              borderRadius: "50%",
+              display: "inline-block"
+            }} />
+            {hoveredPixel.ownerName ? `${hoveredPixel.ownerName}'s pixel` : 'Unclaimed pixel'}
+          </div>
+          <a
+            href={hoveredPixel.link || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: "#0066cc",
+              textDecoration: "none",
+              fontSize: "14px",
+              display: "block",
+              padding: "8px 12px",
+              backgroundColor: "rgba(0, 102, 204, 0.08)",
+              borderRadius: "6px",
+              transition: "all 0.2s ease",
+              border: "1px solid rgba(0, 102, 204, 0.1)",
+              position: "relative",
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "rgba(0, 102, 204, 0.12)";
+              e.currentTarget.style.transform = "translateY(-1px)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "rgba(0, 102, 204, 0.08)";
+              e.currentTarget.style.transform = "translateY(0)";
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const link = hoveredPixel.link;
+              if (link) {
+                window.open(link, '_blank');
+              }
+            }}
+          >
+            {hoveredPixel.link}
+          </a>
+        </div>
+      )}
+
       {/* Add this style to your existing styles */}
       <style>
         {`
+          @keyframes popupFadeIn {
+            from {
+              opacity: 0;
+              transform: translateY(10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
           @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
-          }
-
-          .mode-toggle-button {
-            padding: 10px 15px;
-            font-size: 14px;
-            cursor: pointer;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            transition: all 0.3s ease;
-            background-color: #2196F3;
-          }
-          
-          .mode-toggle-button:disabled {
-            cursor: not-allowed;
-            opacity: 0.5;
-          }
-          
-          .mode-toggle-button[data-active="true"] {
-            background-color: #4CAF50;
           }
 
           @keyframes fadeIn {
@@ -2121,6 +2217,26 @@ export default function PixelCanvas() {
               opacity: 0;
             }
           }
+
+          .mode-toggle-button {
+            padding: 10px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            background-color: #2196F3;
+          }
+          
+          .mode-toggle-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+          }
+          
+          .mode-toggle-button[data-active="true"] {
+            background-color: #4CAF50;
+          }
         `}
       </style>
 
@@ -2130,7 +2246,7 @@ export default function PixelCanvas() {
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
-        onMouseLeave={onMouseUp}
+        onMouseLeave={onMouseLeave}
         onWheel={onWheel}
         onClick={(e) => {
           if (mode === "edit" && !isConfigLoaded) {
