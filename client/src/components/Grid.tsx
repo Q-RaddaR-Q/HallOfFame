@@ -5,6 +5,8 @@ import { Elements, CardElement, useStripe, useElements } from "@stripe/react-str
 import { pixelService, Pixel } from "../services/pixelService";
 import { configService } from "../services/configService";
 import SelectedPixelsPanel from './SelectedPixelsPanel';
+import TimelineSlider from './TimelineSlider';
+import TopMenu from './TopMenu';
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLIC_KEY || '');
 
@@ -436,6 +438,8 @@ export default function PixelCanvas() {
   const [bulkLink, setBulkLink] = useState('');
   const [hoveredPixel, setHoveredPixel] = useState<Pixel | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+  const [allPixels, setAllPixels] = useState<Pixel[]>([]);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   // Add ref for selected pixels
   const selectedPixelsRef = useRef<Array<{ x: number; y: number; color: string }>>([]);
@@ -482,6 +486,7 @@ export default function PixelCanvas() {
     const loadPixels = async () => {
       try {
         const pixels = await pixelService.getAllPixels();
+        setAllPixels(pixels);
         pixels.forEach((pixel: Pixel) => {
           coloredPixels.current.set(`${pixel.x},${pixel.y}`, pixel.color);
         });
@@ -493,6 +498,20 @@ export default function PixelCanvas() {
 
     loadPixels();
   }, []);
+
+  // Update visible pixels based on selected date
+  useEffect(() => {
+    if (selectedDate) {
+      coloredPixels.current.clear();
+      allPixels.forEach((pixel: Pixel) => {
+        const pixelDate = new Date(pixel.lastUpdated);
+        if (pixelDate <= selectedDate) {
+          coloredPixels.current.set(`${pixel.x},${pixel.y}`, pixel.color);
+        }
+      });
+      triggerDraw();
+    }
+  }, [selectedDate, allPixels]);
 
   // Load configuration on component mount
   useEffect(() => {
@@ -2240,7 +2259,14 @@ export default function PixelCanvas() {
         `}
       </style>
 
-      {/* Canvas */}
+      {/* Add TimelineSlider in view mode */}
+      {mode === "view" && allPixels.length > 0 && (
+        <TopMenu
+          pixels={allPixels}
+          onTimeChange={(date) => setSelectedDate(date)}
+        />
+      )}
+
       <canvas
         ref={canvasRef}
         onMouseDown={onMouseDown}
