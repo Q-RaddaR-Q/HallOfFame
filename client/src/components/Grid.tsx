@@ -7,6 +7,7 @@ import { configService } from "../services/configService";
 import SelectedPixelsPanel from './SelectedPixelsPanel';
 import TimelineSlider from './TimelineSlider';
 import TopMenu from './TopMenu';
+import websocketService from '../services/websocketService';
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLIC_KEY || '');
 
@@ -1078,6 +1079,21 @@ export default function PixelCanvas() {
     setHoveredPixel(null);
     setHoverPosition(null);
   };
+
+  // Add WebSocket subscription
+  useEffect(() => {
+    const unsubscribe = websocketService.subscribe((pixel) => {
+      // Update the coloredPixels map with the new pixel
+      coloredPixels.current.set(`${pixel.x},${pixel.y}`, pixel.color);
+      // Trigger a redraw
+      triggerDraw();
+    });
+
+    // Cleanup subscription on unmount
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
