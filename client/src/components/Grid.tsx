@@ -31,7 +31,8 @@ function PaymentForm({
   bidAmount,
   ownerId,
   ownerName,
-  minPrice
+  minPrice,
+  isProtectedPixel
 }: { 
   amount: number; 
   onSuccess: () => void; 
@@ -44,6 +45,7 @@ function PaymentForm({
   ownerId: string;
   ownerName: string;
   minPrice: number;
+  isProtectedPixel: boolean;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -134,33 +136,35 @@ function PaymentForm({
         </div>
       )}
 
-      {/* Add Pixel Security Option */}
-      <div style={{ marginBottom: "20px" }}>
-        <label style={{ 
-          display: 'flex', 
-          alignItems: 'center',
-          cursor: 'pointer'
-        }}>
-          <input
-            type="checkbox"
-            checked={withSecurity}
-            onChange={(e) => setWithSecurity(e.target.checked)}
-            style={{ marginRight: '10px' }}
-          />
-          Add Pixel Security (4x additional cost)
-        </label>
-        {withSecurity && (
-          <div style={{ 
-            marginTop: '10px',
-            padding: '10px',
-            backgroundColor: '#f8f9fa',
-            borderRadius: '4px'
+      {/* Add Pixel Security Option - only show if not a protected pixel */}
+      {!isProtectedPixel && (
+        <div style={{ marginBottom: "20px" }}>
+          <label style={{ 
+            display: 'flex', 
+            alignItems: 'center',
+            cursor: 'pointer'
           }}>
-            <p style={{ margin: '0 0 5px 0' }}>Total cost: ${(bidAmount * 5).toFixed(2)}</p>
-            <p style={{ margin: '0', color: '#666' }}>Your pixel will be secured for 7 days</p>
-          </div>
-        )}
-      </div>
+            <input
+              type="checkbox"
+              checked={withSecurity}
+              onChange={(e) => setWithSecurity(e.target.checked)}
+              style={{ marginRight: '10px' }}
+            />
+            Add Pixel Security (4x additional cost)
+          </label>
+          {withSecurity && (
+            <div style={{ 
+              marginTop: '10px',
+              padding: '10px',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '4px'
+            }}>
+              <p style={{ margin: '0 0 5px 0' }}>Total cost: ${(bidAmount * 5).toFixed(2)}</p>
+              <p style={{ margin: '0', color: '#666' }}>Your pixel will be secured for 7 days</p>
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ marginBottom: "20px" }}>
         <CardElement
@@ -522,6 +526,7 @@ export default function PixelCanvas() {
     y: number;
     ownerName: string;
     expiresAt: Date;
+    price: number;
   } | null>(null);
 
   // Add ref for selected pixels
@@ -859,11 +864,13 @@ export default function PixelCanvas() {
             const pixel = await pixelService.getPixel(gridX, gridY);
             // Check if pixel is secured and not expired
             if (pixel.isSecured && pixel.securityExpiresAt && new Date(pixel.securityExpiresAt) > new Date()) {
+              // For protected pixels, show warning first
               setSecuredPixelInfo({
                 x: pixel.x,
                 y: pixel.y,
                 ownerName: pixel.ownerName || 'Unknown',
-                expiresAt: new Date(pixel.securityExpiresAt)
+                expiresAt: new Date(pixel.securityExpiresAt),
+                price: pixel.price
               });
               setShowSecuredPixelWarning(true);
               return;
@@ -1797,57 +1804,76 @@ export default function PixelCanvas() {
               <>
                 {/* Price Input Section */}
                 <div style={{ marginBottom: "20px" }}>
-                  <label style={{ display: "block", marginBottom: "8px" }}>
-                    Set your price (minimum ${selectedPixel ? (selectedPixel.price + minPrice).toFixed(2) : minPrice.toFixed(2)}):
-                  </label>
-                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                    <input
-                      type="number"
-                      min={selectedPixel ? selectedPixel.price + minPrice : minPrice}
-                      step={0.1}
-                      value={bidAmount}
-                      onChange={(e) => {
-                        const newBid = parseFloat(e.target.value);
-                        if (!isNaN(newBid)) {
-                          setBidAmount(newBid);
-                        }
-                      }}
-                      style={{
-                        flex: 1,
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: `1px solid ${bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) ? "#ff0000" : "#ccc"}`,
-                        backgroundColor: bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) ? "#fff5f5" : "white"
-                      }}
-                    />
-                    <button
-                      onClick={() => setBidAmount(selectedPixel ? selectedPixel.price + minPrice : minPrice)}
-                      style={{
-                        padding: "8px 12px",
-                        backgroundColor: "#f0f0f0",
-                        border: "1px solid #ccc",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Min
-                    </button>
-                  </div>
-                  {bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) && (
-                    <p style={{ 
-                      color: "#ff0000", 
-                      fontSize: "12px", 
-                      marginTop: "4px",
-                      marginBottom: 0
-                    }}>
-                      {selectedPixel 
-                        ? `Your bid must be at least $${(selectedPixel.price + minPrice).toFixed(2)} to take over this pixel`
-                        : `Your bid must be at least $${minPrice.toFixed(2)} to place a new pixel`}
-                    </p>
+                  {selectedPixel && selectedPixel.isSecured && selectedPixel.securityExpiresAt && new Date(selectedPixel.securityExpiresAt) > new Date() ? (
+                    <div style={{ marginBottom: "20px" }}>
+                      <p style={{ color: "#666", marginBottom: "10px" }}>
+                        This is a protected pixel. To purchase it, you must pay exactly 10x its current price.
+                      </p>
+                      <div style={{ 
+                        padding: "15px", 
+                        backgroundColor: "#f8f9fa", 
+                        borderRadius: "8px",
+                        border: "1px solid #e9ecef"
+                      }}>
+                        <p style={{ margin: "0 0 5px 0" }}>Current Price: ${selectedPixel.price.toFixed(2)}</p>
+                        <p style={{ margin: "0", fontWeight: "bold" }}>Required Price: ${(selectedPixel.price * 10).toFixed(2)}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ display: "block", marginBottom: "8px" }}>
+                        Set your price (minimum ${selectedPixel ? (selectedPixel.price + minPrice).toFixed(2) : minPrice.toFixed(2)}):
+                      </label>
+                      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        <input
+                          type="number"
+                          min={selectedPixel ? selectedPixel.price + minPrice : minPrice}
+                          step={0.1}
+                          value={bidAmount}
+                          onChange={(e) => {
+                            const newBid = parseFloat(e.target.value);
+                            if (!isNaN(newBid)) {
+                              setBidAmount(newBid);
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: "8px",
+                            borderRadius: "4px",
+                            border: `1px solid ${bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) ? "#ff0000" : "#ccc"}`,
+                            backgroundColor: bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) ? "#fff5f5" : "white"
+                          }}
+                        />
+                        <button
+                          onClick={() => setBidAmount(selectedPixel ? selectedPixel.price + minPrice : minPrice)}
+                          style={{
+                            padding: "8px 12px",
+                            backgroundColor: "#f0f0f0",
+                            border: "1px solid #ccc",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Min
+                        </button>
+                      </div>
+                      {bidAmount < (selectedPixel ? selectedPixel.price + minPrice : minPrice) && (
+                        <p style={{ 
+                          color: "#ff0000", 
+                          fontSize: "12px", 
+                          marginTop: "4px",
+                          marginBottom: 0
+                        }}>
+                          {selectedPixel 
+                            ? `Your bid must be at least $${(selectedPixel.price + minPrice).toFixed(2)} to take over this pixel`
+                            : `Your bid must be at least $${minPrice.toFixed(2)} to place a new pixel`}
+                        </p>
+                      )}
+                      <p style={{ marginTop: "8px", fontSize: "14px", color: "#666" }}>
+                        The higher your price, the more protection you have from others taking over your pixel.
+                      </p>
+                    </>
                   )}
-                  <p style={{ marginTop: "8px", fontSize: "14px", color: "#666" }}>
-                    The higher your price, the more protection you have from others taking over your pixel.
-                  </p>
                 </div>
 
                 {/* Payment Summary */}
@@ -1900,6 +1926,7 @@ export default function PixelCanvas() {
                     ownerId={getOrCreateBrowserId()}
                     ownerName={ownerName}
                     minPrice={minPrice}
+                    isProtectedPixel={Boolean(selectedPixel?.isSecured && selectedPixel?.securityExpiresAt && new Date(selectedPixel.securityExpiresAt) > new Date())}
                   />
                 </Elements>
               </>
@@ -2549,46 +2576,151 @@ export default function PixelCanvas() {
         }}>
           <div style={{
             backgroundColor: "white",
-            padding: "20px",
+            padding: "30px",
             borderRadius: "12px",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-            maxWidth: "400px",
+            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.1)",
+            maxWidth: "500px",
             width: "90%",
+            border: "1px solid #e0e0e0",
           }}>
-            <h3 style={{ marginBottom: "15px", fontSize: "18px", color: "#e74c3c" }}>
-              Pixel is Secured
-            </h3>
-            <div style={{ marginBottom: "20px" }}>
-              <p style={{ marginBottom: "10px" }}>
-                This pixel at ({securedPixelInfo.x}, {securedPixelInfo.y}) is currently secured by {securedPixelInfo.ownerName}.
-              </p>
-              <p style={{ marginBottom: "10px" }}>
-                Security expires on: {securedPixelInfo.expiresAt.toLocaleString()}
-              </p>
-              <p style={{ color: "#666", fontSize: "14px" }}>
-                You cannot purchase this pixel until the security period ends.
-              </p>
+            <div style={{
+              textAlign: "center",
+              marginBottom: "20px",
+            }}>
+              <h2 style={{ 
+                color: "#333", 
+                fontSize: "24px", 
+                marginBottom: "10px",
+              }}>
+                Protected Pixel
+              </h2>
+              <div style={{
+                width: "100%",
+                height: "2px",
+                background: "linear-gradient(90deg, transparent, #4CAF50, transparent)",
+                marginBottom: "20px"
+              }} />
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+
+            <div style={{ 
+              backgroundColor: "#f8f9fa", 
+              padding: "20px",
+              borderRadius: "8px",
+              marginBottom: "20px",
+              border: "1px solid #e9ecef"
+            }}>
+              <p style={{ 
+                color: "#333", 
+                fontSize: "16px", 
+                marginBottom: "15px",
+                fontWeight: "500"
+              }}>
+                This pixel is currently protected by {securedPixelInfo.ownerName}
+              </p>
+              <div style={{ 
+                display: "grid",
+                gap: "10px",
+                marginBottom: "15px"
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#666" }}>Current Price:</span>
+                  <span style={{ color: "#333", fontWeight: "500" }}>${securedPixelInfo.price.toFixed(2)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#666" }}>Required Price:</span>
+                  <span style={{ color: "#4CAF50", fontWeight: "bold" }}>${(securedPixelInfo.price * 10).toFixed(2)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#666" }}>Protection expires:</span>
+                  <span style={{ color: "#666" }}>{securedPixelInfo.expiresAt.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            <p style={{ 
+              color: "#666", 
+              marginBottom: "20px",
+              fontSize: "14px",
+              textAlign: "center"
+            }}>
+              To purchase this protected pixel, you'll need to pay 10x its current price.
+            </p>
+
+            <div style={{ 
+              display: "flex", 
+              gap: "15px", 
+              justifyContent: "center"
+            }}>
               <button
                 onClick={() => {
                   setShowSecuredPixelWarning(false);
                   setSecuredPixelInfo(null);
                 }}
                 style={{
-                  padding: "8px 16px",
+                  padding: "12px 24px",
                   backgroundColor: "#f0f0f0",
+                  color: "#333",
                   border: "1px solid #ccc",
                   borderRadius: "6px",
                   cursor: "pointer",
+                  fontSize: "16px",
+                  transition: "all 0.3s ease"
                 }}
+                className="cancel-button"
               >
-                Close
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowSecuredPixelWarning(false);
+                  setSelectedPixel({
+                    x: securedPixelInfo.x,
+                    y: securedPixelInfo.y,
+                    price: securedPixelInfo.price,
+                    isSecured: true,
+                    securityExpiresAt: securedPixelInfo.expiresAt.toISOString(),
+                    ownerName: securedPixelInfo.ownerName,
+                    color: selectedColor,
+                    ownerId: getOrCreateBrowserId(),
+                    link: '',
+                    lastUpdated: new Date().toISOString()
+                  });
+                  setBidAmount(securedPixelInfo.price * 10);
+                  setPendingPixel({ x: securedPixelInfo.x, y: securedPixelInfo.y });
+                  setShowChoiceModal(true);
+                }}
+                style={{
+                  padding: "12px 24px",
+                  backgroundColor: "#4CAF50",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  fontSize: "16px",
+                  fontWeight: "500",
+                  transition: "all 0.3s ease"
+                }}
+                className="proceed-button"
+              >
+                Proceed to Purchase
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Update the styles */}
+      <style>
+        {`
+          .cancel-button:hover {
+            background-color: #e0e0e0;
+          }
+
+          .proceed-button:hover {
+            background-color: #45a049;
+          }
+        `}
+      </style>
     </div>
   );
 }

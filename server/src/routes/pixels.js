@@ -61,15 +61,21 @@ router.post('/', async (req, res) => {
     if (existingPixel && existingPixel.isSecured) {
       const now = new Date();
       if (existingPixel.securityExpiresAt && existingPixel.securityExpiresAt > now) {
-        return res.status(400).json({
-          message: 'This pixel is currently secured and cannot be purchased',
-          securedUntil: existingPixel.securityExpiresAt
-        });
+        // For protected pixels, require exactly 10x the current price
+        const requiredPrice = existingPixel.price * 10;
+        const epsilon = 0.001; // Small value to handle floating-point precision
+        if (Math.abs(price - requiredPrice) > epsilon) {
+          return res.status(400).json({ 
+            message: `Protected pixel requires exactly $${requiredPrice.toFixed(2)} to purchase`,
+            requiredPrice: requiredPrice,
+            currentPrice: existingPixel.price
+          });
+        }
       }
     }
 
     // If pixel exists and new price is not at least minPrice more, reject
-    if (existingPixel) {
+    if (existingPixel && (!existingPixel.isSecured || !existingPixel.securityExpiresAt || new Date(existingPixel.securityExpiresAt) <= new Date())) {
       const minRequiredPrice = existingPixel.price + PIXEL_CONFIG.minPrice;
       const epsilon = 0.001; // Small value to handle floating-point precision
       if (price < minRequiredPrice - epsilon) {
