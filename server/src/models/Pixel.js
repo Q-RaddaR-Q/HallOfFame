@@ -34,6 +34,15 @@ const Pixel = sequelize.define('Pixel', {
   lastUpdated: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
+  },
+  isSecured: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  securityExpiresAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
   }
 }, {
   indexes: [

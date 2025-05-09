@@ -129,48 +129,26 @@ router.post('/create-payment-intent', async (req, res) => {
 // Create a bulk payment intent for multiple pixels
 router.post('/create-bulk-payment-intent', async (req, res) => {
   try {
-    console.log('=== Bulk Payment Intent Creation Request ===');
-    console.log('Request headers:', req.headers);
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    
     const { pixels, totalAmount, ownerId, ownerName } = req.body;
-    
-    // Validate all required fields
-    const missingFields = [];
-    if (!pixels || !Array.isArray(pixels) || pixels.length === 0) missingFields.push('pixels');
-    if (!ownerId) missingFields.push('ownerId');
-    if (!totalAmount) missingFields.push('totalAmount');
-    
-    if (missingFields.length > 0) {
-      console.error('Missing required fields:', missingFields);
-      return res.status(400).json({ 
-        message: 'Missing required fields',
-        error: `The following fields are required: ${missingFields.join(', ')}`,
-        missingFields
-      });
-    }
-
-    if (!process.env.STRIPE_SECRET_KEY) {
-      console.error('Stripe secret key is not configured');
-      return res.status(500).json({ 
-        message: 'Stripe secret key is not configured',
-        error: 'Please configure STRIPE_SECRET_KEY in your environment variables'
-      });
-    }
-
-    // Validate total amount is a number and greater than 0
     const totalAmountNum = parseFloat(totalAmount);
-    if (isNaN(totalAmountNum) || totalAmountNum <= 0) {
-      console.error('Invalid total amount:', totalAmount);
+    let expectedTotal = 0;
+
+    // Validate input
+    if (!Array.isArray(pixels) || pixels.length === 0) {
       return res.status(400).json({
-        message: 'Invalid total amount',
-        error: 'Total amount must be a positive number',
-        receivedAmount: totalAmount
+        message: 'Invalid pixels data',
+        error: 'Pixels must be a non-empty array'
       });
     }
 
-    // Validate each pixel and calculate total expected amount
-    let expectedTotal = 0;
+    if (!ownerId || !ownerName) {
+      return res.status(400).json({
+        message: 'Missing required fields',
+        error: 'ownerId and ownerName are required'
+      });
+    }
+
+    // Check each pixel
     for (const pixel of pixels) {
       if (!pixel.x || !pixel.y || !pixel.color || !pixel.price) {
         return res.status(400).json({
@@ -185,6 +163,15 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
       });
 
       if (existingPixel) {
+        // Check if pixel is secured and not expired
+        if (existingPixel.isSecured && existingPixel.securityExpiresAt > new Date()) {
+          return res.status(400).json({
+            message: 'Pixel is secured',
+            error: `Pixel at (${pixel.x}, ${pixel.y}) is secured until ${existingPixel.securityExpiresAt}`,
+            securedUntil: existingPixel.securityExpiresAt
+          });
+        }
+
         const minBid = existingPixel.price + PIXEL_CONFIG.minPrice;
         if (pixel.price < minBid) {
           return res.status(400).json({
@@ -225,7 +212,8 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
       metadata: {
         ownerId,
         ownerName,
-        pixelCount: pixels.length
+        pixelCount: pixels.length,
+        withSecurity: pixels[0].withSecurity ? 'true' : 'false' // Store security preference
       }
     };
 
@@ -250,6 +238,13 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
         existingPixels.map(pixel => [`${pixel.x},${pixel.y}`, pixel])
       );
 
+      // Calculate security expiration if security option is chosen
+      let securityExpiresAt = null;
+      if (pixels[0].withSecurity) {
+        securityExpiresAt = new Date();
+        securityExpiresAt.setDate(securityExpiresAt.getDate() + 7); // Add 7 days
+      }
+
       // Prepare new pixels array
       const newPixels = pixels.map(pixel => {
         const existingPixel = existingPixelMap.get(`${pixel.x},${pixel.y}`);
@@ -260,7 +255,9 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
             price: pixel.price,
             ownerId,
             ownerName,
-            lastUpdated: new Date()
+            lastUpdated: new Date(),
+            isSecured: pixel.withSecurity,
+            securityExpiresAt: pixel.withSecurity ? securityExpiresAt : null
           };
         }
         return {
@@ -270,13 +267,15 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
           price: pixel.price,
           ownerId,
           ownerName,
-          lastUpdated: new Date()
+          lastUpdated: new Date(),
+          isSecured: pixel.withSecurity,
+          securityExpiresAt: pixel.withSecurity ? securityExpiresAt : null
         };
       });
 
       // Update or create pixels
       await Pixel.bulkCreate(newPixels, {
-        updateOnDuplicate: ['color', 'price', 'ownerId', 'ownerName', 'lastUpdated']
+        updateOnDuplicate: ['color', 'price', 'ownerId', 'ownerName', 'lastUpdated', 'isSecured', 'securityExpiresAt']
       });
 
       // Broadcast updates for each pixel
@@ -291,7 +290,9 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
               price: pixel.price,
               ownerId: pixel.ownerId,
               ownerName: pixel.ownerName,
-              lastUpdated: pixel.lastUpdated
+              lastUpdated: pixel.lastUpdated,
+              isSecured: pixel.isSecured,
+              securityExpiresAt: pixel.securityExpiresAt
             }
           });
 

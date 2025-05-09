@@ -44,7 +44,7 @@ router.get('/:x/:y', async (req, res) => {
 // Create or update pixel with payment
 router.post('/', async (req, res) => {
   try {
-    const { color, price, ownerId, paymentIntentId, ownerName, link } = req.body;
+    const { color, price, ownerId, paymentIntentId, ownerName, link, withSecurity } = req.body;
     const x = parseInt(req.body.x, 10);
     const y = parseInt(req.body.y, 10);
 
@@ -57,12 +57,27 @@ router.post('/', async (req, res) => {
       where: { x, y }
     });
 
+    // If pixel exists and is secured, check if security has expired
+    if (existingPixel && existingPixel.isSecured) {
+      const now = new Date();
+      if (existingPixel.securityExpiresAt && existingPixel.securityExpiresAt > now) {
+        return res.status(400).json({
+          message: 'This pixel is currently secured and cannot be purchased',
+          securedUntil: existingPixel.securityExpiresAt
+        });
+      }
+    }
+
     // If pixel exists and new price is not at least minPrice more, reject
-    if (existingPixel && price <= existingPixel.price + PIXEL_CONFIG.minPrice) {
-      return res.status(400).json({ 
-        message: `New price must be at least $${PIXEL_CONFIG.minPrice} more than current price`,
-        currentPrice: existingPixel.price
-      });
+    if (existingPixel) {
+      const minRequiredPrice = existingPixel.price + PIXEL_CONFIG.minPrice;
+      const epsilon = 0.001; // Small value to handle floating-point precision
+      if (price < minRequiredPrice - epsilon) {
+        return res.status(400).json({ 
+          message: `New price must be at least $${PIXEL_CONFIG.minPrice} more than current price`,
+          currentPrice: existingPixel.price
+        });
+      }
     }
 
     // If paymentIntentId is provided, verify the payment
@@ -93,10 +108,25 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Calculate security expiration if security option is chosen
+    let securityExpiresAt = null;
+    if (withSecurity) {
+      securityExpiresAt = new Date();
+      securityExpiresAt.setDate(securityExpiresAt.getDate() + 7); // Add 7 days
+    }
+
     // Update or create the pixel
     const [pixel, created] = await Pixel.findOrCreate({
       where: { x, y },
-      defaults: { color, price, ownerId, ownerName, link }
+      defaults: { 
+        color, 
+        price, 
+        ownerId, 
+        ownerName, 
+        link,
+        isSecured: withSecurity,
+        securityExpiresAt
+      }
     });
 
     if (!created) {
@@ -104,10 +134,10 @@ router.post('/', async (req, res) => {
       pixel.price = price;
       pixel.ownerId = ownerId;
       pixel.ownerName = ownerName;
-      if (link) {
-        pixel.link = link;
-      }
+      pixel.link = link;
       pixel.lastUpdated = new Date();
+      pixel.isSecured = withSecurity;
+      pixel.securityExpiresAt = securityExpiresAt;
       await pixel.save();
     }
 
@@ -134,10 +164,17 @@ router.post('/', async (req, res) => {
       });
     }
 
-    res.json({ pixel });
-  } catch (err) {
-    console.error('Error updating pixel:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.json({
+      pixel,
+      message: created ? 'Pixel created successfully' : 'Pixel updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error creating/updating pixel:', error);
+    return res.status(500).json({ 
+      message: 'Error creating/updating pixel',
+      error: error.message
+    });
   }
 });
 
