@@ -3,6 +3,7 @@ const router = express.Router();
 const Pixel = require('../models/Pixel');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { PIXEL_CONFIG } = require('../config/constants');
+const WebSocket = require('ws');
 
 // Get all pixels
 router.get('/', async (req, res) => {
@@ -108,6 +109,29 @@ router.post('/', async (req, res) => {
       }
       pixel.lastUpdated = new Date();
       await pixel.save();
+    }
+
+    // Broadcast the pixel update to all connected clients
+    if (global.wss) {
+      const message = JSON.stringify({
+        type: 'pixelUpdate',
+        pixel: {
+          x: pixel.x,
+          y: pixel.y,
+          color: pixel.color,
+          price: pixel.price,
+          ownerId: pixel.ownerId,
+          ownerName: pixel.ownerName,
+          link: pixel.link,
+          lastUpdated: pixel.lastUpdated
+        }
+      });
+
+      global.wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(message);
+        }
+      });
     }
 
     res.json({ pixel });

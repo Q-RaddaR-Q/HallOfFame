@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const sequelize = require('./config/database');
+const WebSocket = require('ws');
 
 // Load environment variables
 dotenv.config();
@@ -34,14 +35,34 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 5000;
 
-// Sync database and start server
+// Create HTTP server
+const server = app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log('Webhook endpoint:', `http://localhost:${PORT}/api/payments/webhook`);
+});
+
+// Create WebSocket server
+const wss = new WebSocket.Server({ server });
+
+// Store connected clients
+const clients = new Set();
+
+// WebSocket connection handler
+wss.on('connection', (ws) => {
+  // Add client to the set
+  clients.add(ws);
+
+  // Handle client disconnection
+  ws.on('close', () => {
+    clients.delete(ws);
+  });
+});
+
+// Make WebSocket server available globally
+global.wss = wss;
+
+// Sync database
 sequelize.sync({ force: false })
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-      console.log('Webhook endpoint:', `http://localhost:${PORT}/api/payments/webhook`);
-    });
-  })
   .catch(error => {
     console.error('Unable to sync database:', error);
     process.exit(1);
