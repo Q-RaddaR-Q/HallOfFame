@@ -11,6 +11,8 @@ export interface Pixel {
   ownerName: string | null;
   link: string | null;
   lastUpdated: string;
+  isSecured: boolean;
+  securityExpiresAt: string | null;
 }
 
 interface PaymentData {
@@ -90,10 +92,21 @@ export const pixelService = {
     ownerId: string,
     paymentIntentId?: string,
     ownerName?: string,
-    link?: string
+    link?: string,
+    withSecurity?: boolean
   ): Promise<{ pixel?: Pixel; currentPrice?: number }> => {
     try {
-      const requestData = { x, y, color, price, ownerId, paymentIntentId, ownerName, link };
+      const requestData = { 
+        x, 
+        y, 
+        color, 
+        price, 
+        ownerId, 
+        paymentIntentId, 
+        ownerName, 
+        link,
+        withSecurity 
+      };
       console.log('Updating pixel with:', requestData);
       
       const response = await axios.post<{ pixel?: Pixel; currentPrice?: number }>(
