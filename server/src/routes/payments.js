@@ -4,6 +4,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const Pixel = require('../models/Pixel');
 const { PIXEL_CONFIG } = require('../config/constants');
 const { Op } = require('sequelize');
+const WebSocket = require('ws');
 
 // Create a payment intent for coloring pixels
 router.post('/create-payment-intent', async (req, res) => {
@@ -249,46 +250,57 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
         existingPixels.map(pixel => [`${pixel.x},${pixel.y}`, pixel])
       );
 
-      // Separate pixels into new and existing
-      const newPixels = [];
-      const pixelsToUpdate = [];
-
-      for (const pixel of pixels) {
-        const key = `${pixel.x},${pixel.y}`;
-        if (existingPixelMap.has(key)) {
-          pixelsToUpdate.push({
-            pixel: existingPixelMap.get(key),
-            newData: {
-              color: pixel.color,
-              price: pixel.price,
-              ownerId,
-              ownerName,
-              paymentIntentId: paymentIntent.id,
-              lastUpdated: new Date()
-            }
-          });
-        } else {
-          newPixels.push({
-            x: pixel.x,
-            y: pixel.y,
+      // Prepare new pixels array
+      const newPixels = pixels.map(pixel => {
+        const existingPixel = existingPixelMap.get(`${pixel.x},${pixel.y}`);
+        if (existingPixel) {
+          return {
+            ...existingPixel.toJSON(),
             color: pixel.color,
             price: pixel.price,
             ownerId,
             ownerName,
-            paymentIntentId: paymentIntent.id,
             lastUpdated: new Date()
+          };
+        }
+        return {
+          x: pixel.x,
+          y: pixel.y,
+          color: pixel.color,
+          price: pixel.price,
+          ownerId,
+          ownerName,
+          lastUpdated: new Date()
+        };
+      });
+
+      // Update or create pixels
+      await Pixel.bulkCreate(newPixels, {
+        updateOnDuplicate: ['color', 'price', 'ownerId', 'ownerName', 'lastUpdated']
+      });
+
+      // Broadcast updates for each pixel
+      if (global.wss) {
+        for (const pixel of newPixels) {
+          const message = JSON.stringify({
+            type: 'pixelUpdate',
+            pixel: {
+              x: pixel.x,
+              y: pixel.y,
+              color: pixel.color,
+              price: pixel.price,
+              ownerId: pixel.ownerId,
+              ownerName: pixel.ownerName,
+              lastUpdated: pixel.lastUpdated
+            }
+          });
+
+          global.wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(message);
+            }
           });
         }
-      }
-
-      // Create new pixels
-      if (newPixels.length > 0) {
-        await Pixel.bulkCreate(newPixels);
-      }
-
-      // Update existing pixels
-      for (const { pixel, newData } of pixelsToUpdate) {
-        await pixel.update(newData);
       }
 
       console.log('Bulk payment intent created successfully:', {
@@ -296,7 +308,7 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
         clientSecret: paymentIntent.client_secret,
         status: paymentIntent.status,
         newPixels: newPixels.length,
-        updatedPixels: pixelsToUpdate.length
+        updatedPixels: pixels.length
       });
 
       // Return only the client secret
