@@ -50,7 +50,7 @@ function PaymentForm({
   const stripe = useStripe();
   const elements = useElements();
   const [link, setLink] = useState('');
-  const [withSecurity, setWithSecurity] = useState(false);
+  const [withSecurity, setWithSecurity] = useState(isProtectedPixel);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -90,7 +90,7 @@ function PaymentForm({
       }
 
       if (paymentIntent && paymentIntent.status === 'succeeded') {
-        // Create or update the pixel with the link
+        // Create or update the pixel with the link and security
         await pixelService.updatePixel(
           pendingPixel.x,
           pendingPixel.y,
@@ -166,6 +166,24 @@ function PaymentForm({
         </div>
       )}
 
+      {/* Show security info for protected pixels */}
+      {isProtectedPixel && (
+        <div style={{ 
+          marginBottom: "20px",
+          padding: "10px",
+          backgroundColor: "#f8f9fa",
+          borderRadius: "4px",
+          border: "1px solid #e9ecef"
+        }}>
+          <p style={{ margin: '0 0 5px 0', color: '#4CAF50', fontWeight: '500' }}>
+            This pixel will be protected for 7 days after purchase
+          </p>
+          <p style={{ margin: '0', color: '#666', fontSize: '14px' }}>
+            The protection is included in the purchase price
+          </p>
+        </div>
+      )}
+
       <div style={{ marginBottom: "20px" }}>
         <CardElement
           options={{
@@ -212,7 +230,7 @@ function PaymentForm({
             opacity: !stripe || isProcessing ? 0.7 : 1,
           }}
         >
-          {isProcessing ? "Processing..." : `Pay $${withSecurity ? (amount * 5).toFixed(2) : amount.toFixed(2)}`}
+          {isProcessing ? "Processing..." : `Pay $${amount.toFixed(2)}`}
         </button>
       </div>
     </form>
@@ -1889,6 +1907,12 @@ export default function PixelCanvas() {
                     <span>Pixel Price:</span>
                     <span>${bidAmount.toFixed(2)}</span>
                   </div>
+                  {withSecurity && (
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                      <span>Security (4x):</span>
+                      <span>${(bidAmount * 4).toFixed(2)}</span>
+                    </div>
+                  )}
                   <div style={{ 
                     display: "grid", 
                     gridTemplateColumns: "1fr 100px",
@@ -1908,14 +1932,16 @@ export default function PixelCanvas() {
                     fontWeight: "bold"
                   }}>
                     <span>Total:</span>
-                    <span style={{ textAlign: "right" }}>${(bidAmount + processingFee).toFixed(2)}</span>
+                    <span style={{ textAlign: "right" }}>
+                      ${(withSecurity ? (bidAmount * 5) + processingFee : bidAmount + processingFee).toFixed(2)}
+                    </span>
                   </div>
                 </div>
 
                 {/* Payment Form */}
                 <Elements stripe={stripe}>
                   <PaymentForm
-                    amount={bidAmount + processingFee}
+                    amount={withSecurity ? (bidAmount * 5) + processingFee : bidAmount + processingFee}
                     onSuccess={handlePaymentSuccess}
                     onCancel={() => setShowPaymentForm(false)}
                     isProcessing={isProcessingPayment}
@@ -2688,6 +2714,8 @@ export default function PixelCanvas() {
                   setBidAmount(securedPixelInfo.price * 10);
                   setPendingPixel({ x: securedPixelInfo.x, y: securedPixelInfo.y });
                   setShowChoiceModal(true);
+                  // Automatically enable security for protected pixel purchases
+                  setWithSecurity(true);
                 }}
                 style={{
                   padding: "12px 24px",
