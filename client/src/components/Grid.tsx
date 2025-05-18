@@ -355,7 +355,7 @@ const BulkPaymentForm = ({
           price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice,
           withSecurity: withSecurity
         })),
-        baseTotal, // Send base total to server
+        finalTotal, // Use finalTotal instead of baseTotal to include security multiplier
         browserId,
         ownerName
       );
@@ -994,18 +994,34 @@ export default function PixelCanvas() {
 
     setIsProcessingPayment(true);
     try {
-      const totalAmount = Array.from(pixelPrices.values()).reduce((sum, price) => {
-        return sum + price;
-      }, 0);
+      // Calculate base total from pixel prices
+      const baseTotal = Array.from(pixelPrices.values()).reduce((sum, price) => sum + price, 0);
+      // Calculate final total with security if enabled
+      const finalTotal = withSecurity ? baseTotal * 4 : baseTotal;
+
+      console.log('Bulk Payment Details:', {
+        baseTotal,
+        finalTotal,
+        withSecurity,
+        processingFee,
+        totalWithFee: finalTotal + processingFee,
+        selectedPixels: selectedPixelsRef.current.map(pixel => ({
+          x: pixel.x,
+          y: pixel.y,
+          color: pixel.color,
+          price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice
+        }))
+      });
 
       const { clientSecret } = await pixelService.createBulkPaymentIntent(
         selectedPixelsRef.current.map(pixel => ({
           x: pixel.x,
           y: pixel.y,
           color: pixel.color,
-          price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice
+          price: pixelPrices.get(`${pixel.x},${pixel.y}`) || minPrice,
+          withSecurity: withSecurity
         })),
-        totalAmount,
+        finalTotal + processingFee, // Send the final total including security and processing fee
         getOrCreateBrowserId(),
         ownerName
       );
@@ -1023,10 +1039,17 @@ export default function PixelCanvas() {
       );
 
       if (confirmError) {
+        console.error('Payment confirmation error:', confirmError);
         throw new Error(confirmError.message);
       }
 
       if (paymentIntent && paymentIntent.status === 'succeeded') {
+        console.log('Payment successful:', {
+          paymentIntentId: paymentIntent.id,
+          amount: paymentIntent.amount,
+          status: paymentIntent.status
+        });
+
         for (const pixel of selectedPixelsRef.current) {
           const updatedPixel = await pixelService.getPixel(pixel.x, pixel.y);
           if (updatedPixel) {
@@ -1042,6 +1065,7 @@ export default function PixelCanvas() {
         throw new Error('Payment was not successful');
       }
     } catch (error) {
+      console.error('Bulk payment error:', error);
       alert(error instanceof Error ? error.message : 'Failed to process payment. Please try again.');
     } finally {
       setIsProcessingPayment(false);

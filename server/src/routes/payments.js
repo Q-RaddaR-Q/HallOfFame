@@ -133,8 +133,19 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
     const totalAmountNum = parseFloat(totalAmount);
     let expectedTotal = 0;
 
+    console.log('=== Bulk Payment Intent Creation Request ===');
+    console.log('Request body:', {
+      totalAmount,
+      totalAmountNum,
+      ownerId,
+      ownerName,
+      pixelCount: pixels.length,
+      withSecurity: pixels[0]?.withSecurity
+    });
+
     // Validate input
     if (!Array.isArray(pixels) || pixels.length === 0) {
+      console.error('Invalid pixels data: not an array or empty');
       return res.status(400).json({ 
         message: 'Invalid pixels data',
         error: 'Pixels must be a non-empty array'
@@ -142,6 +153,7 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
     }
 
     if (!ownerId || !ownerName) {
+      console.error('Missing required fields:', { ownerId, ownerName });
       return res.status(400).json({
         message: 'Missing required fields',
         error: 'ownerId and ownerName are required'
@@ -150,7 +162,15 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
 
     // Check each pixel
     for (const pixel of pixels) {
+      console.log('Processing pixel:', {
+        x: pixel.x,
+        y: pixel.y,
+        price: pixel.price,
+        withSecurity: pixel.withSecurity
+      });
+
       if (!pixel.x || !pixel.y || !pixel.color || !pixel.price) {
+        console.error('Invalid pixel data:', pixel);
         return res.status(400).json({
           message: 'Invalid pixel data',
           error: 'Each pixel must have x, y, color, and price properties'
@@ -163,8 +183,20 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
       });
 
       if (existingPixel) {
+        console.log('Existing pixel found:', {
+          x: existingPixel.x,
+          y: existingPixel.y,
+          currentPrice: existingPixel.price,
+          newPrice: pixel.price
+        });
+
         // Check if pixel is secured and not expired
         if (existingPixel.isSecured && existingPixel.securityExpiresAt > new Date()) {
+          console.error('Pixel is secured:', {
+            x: pixel.x,
+            y: pixel.y,
+            expiresAt: existingPixel.securityExpiresAt
+          });
           return res.status(400).json({
             message: 'Pixel is secured',
             error: `Pixel at (${pixel.x}, ${pixel.y}) is secured until ${existingPixel.securityExpiresAt}`,
@@ -174,6 +206,13 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
 
         const minBid = existingPixel.price + PIXEL_CONFIG.minPrice;
         if (pixel.price < minBid) {
+          console.error('Bid too low:', {
+            x: pixel.x,
+            y: pixel.y,
+            bid: pixel.price,
+            minBid,
+            currentPrice: existingPixel.price
+          });
           return res.status(400).json({
             message: 'Bid too low',
             error: `Bid must be at least $${minBid.toFixed(2)} to take over pixel at (${pixel.x}, ${pixel.y})`,
@@ -183,6 +222,12 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
           });
         }
       } else if (pixel.price < PIXEL_CONFIG.minPrice) {
+        console.error('New pixel bid too low:', {
+          x: pixel.x,
+          y: pixel.y,
+          bid: pixel.price,
+          minPrice: PIXEL_CONFIG.minPrice
+        });
         return res.status(400).json({
           message: 'Bid too low',
           error: `Bid must be at least $${PIXEL_CONFIG.minPrice} to place a new pixel at (${pixel.x}, ${pixel.y})`,
@@ -191,14 +236,33 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
         });
       }
 
-      expectedTotal += pixel.price;
+      // Add to expected total, applying security multiplier if enabled
+      expectedTotal += pixel.withSecurity ? pixel.price * 4 : pixel.price;
     }
+
+    console.log('Price validation:', {
+      expectedTotal,
+      receivedTotal: totalAmountNum,
+      difference: Math.abs(expectedTotal - totalAmountNum),
+      withSecurity: pixels[0]?.withSecurity
+    });
 
     // Verify that the provided total amount matches the sum of individual pixel prices
     if (Math.abs(expectedTotal - totalAmountNum) > 0.01) {
+      console.error('Total amount mismatch:', {
+        expectedTotal,
+        receivedTotal: totalAmountNum,
+        difference: Math.abs(expectedTotal - totalAmountNum),
+        withSecurity: pixels[0]?.withSecurity
+      });
       return res.status(400).json({
         message: 'Total amount mismatch',
-        error: `Total amount (${totalAmountNum}) does not match sum of individual pixel prices (${expectedTotal})`
+        error: `Total amount (${totalAmountNum}) does not match sum of individual pixel prices (${expectedTotal})`,
+        details: {
+          expectedTotal,
+          receivedTotal: totalAmountNum,
+          withSecurity: pixels[0]?.withSecurity
+        }
       });
     }
 
@@ -213,7 +277,14 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
         ownerId,
         ownerName,
         pixelCount: pixels.length,
-        withSecurity: pixels[0].withSecurity ? 'true' : 'false' // Store security preference
+        withSecurity: pixels[0].withSecurity ? 'true' : 'false',
+        baseAmount: (totalAmountNum / (pixels[0].withSecurity ? 4 : 1)).toFixed(2),
+        pixels: JSON.stringify(pixels.map(p => ({
+          x: p.x,
+          y: p.y,
+          color: p.color,
+          price: p.price
+        })))
       }
     };
 
@@ -221,105 +292,18 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
 
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentData);
 
-    // Store the pixel data in our database with the payment intent ID
-    try {
-      // First check which pixels already exist
-      const existingPixels = await Pixel.findAll({
-        where: {
-          [Op.or]: pixels.map(pixel => ({
-            x: pixel.x,
-            y: pixel.y
-          }))
-        }
-      });
+    console.log('Bulk payment intent created successfully:', {
+      id: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      status: paymentIntent.status,
+      amount: paymentIntent.amount,
+      metadata: paymentIntent.metadata
+    });
 
-      // Create a map of existing pixels for quick lookup
-      const existingPixelMap = new Map(
-        existingPixels.map(pixel => [`${pixel.x},${pixel.y}`, pixel])
-      );
-
-      // Calculate security expiration if security option is chosen
-      let securityExpiresAt = null;
-      if (pixels[0].withSecurity) {
-        securityExpiresAt = new Date();
-        securityExpiresAt.setDate(securityExpiresAt.getDate() + 7); // Add 7 days
-      }
-
-      // Prepare new pixels array
-      const newPixels = pixels.map(pixel => {
-        const existingPixel = existingPixelMap.get(`${pixel.x},${pixel.y}`);
-        if (existingPixel) {
-          return {
-            ...existingPixel.toJSON(),
-            color: pixel.color,
-            price: pixel.price,
-            ownerId,
-            ownerName,
-            lastUpdated: new Date(),
-            isSecured: pixel.withSecurity,
-            securityExpiresAt: pixel.withSecurity ? securityExpiresAt : null
-          };
-        }
-        return {
-          x: pixel.x,
-          y: pixel.y,
-          color: pixel.color,
-          price: pixel.price,
-          ownerId,
-          ownerName,
-          lastUpdated: new Date(),
-          isSecured: pixel.withSecurity,
-          securityExpiresAt: pixel.withSecurity ? securityExpiresAt : null
-        };
-      });
-
-      // Update or create pixels
-      await Pixel.bulkCreate(newPixels, {
-        updateOnDuplicate: ['color', 'price', 'ownerId', 'ownerName', 'lastUpdated', 'isSecured', 'securityExpiresAt']
-      });
-
-      // Broadcast updates for each pixel
-      if (global.wss) {
-        for (const pixel of newPixels) {
-          const message = JSON.stringify({
-            type: 'pixelUpdate',
-            pixel: {
-              x: pixel.x,
-              y: pixel.y,
-              color: pixel.color,
-              price: pixel.price,
-              ownerId: pixel.ownerId,
-              ownerName: pixel.ownerName,
-              lastUpdated: pixel.lastUpdated,
-              isSecured: pixel.isSecured,
-              securityExpiresAt: pixel.securityExpiresAt
-            }
-          });
-
-          global.wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(message);
-            }
-          });
-        }
-      }
-
-      console.log('Bulk payment intent created successfully:', {
-        id: paymentIntent.id,
-        clientSecret: paymentIntent.client_secret,
-        status: paymentIntent.status,
-        newPixels: newPixels.length,
-        updatedPixels: pixels.length
-      });
-
-      // Return only the client secret
-      res.json({
-        clientSecret: paymentIntent.client_secret
-      });
-    } catch (err) {
-      console.error('Error storing pixel data:', err);
-      res.status(500).json({ error: 'Error storing pixel data' });
-    }
+    // Return only the client secret
+    res.json({
+      clientSecret: paymentIntent.client_secret
+    });
   } catch (err) {
     console.error('=== Bulk Payment Intent Creation Error ===');
     console.error('Error details:', {
@@ -381,19 +365,65 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
         // Check if this is a bulk payment
         if (paymentIntent.metadata.pixelCount) {
           try {
-            const { ownerId, ownerName } = paymentIntent.metadata;
+            const { ownerId, ownerName, withSecurity } = paymentIntent.metadata;
             
             if (!ownerId || !ownerName) {
               console.error('Invalid bulk payment metadata:', paymentIntent.id);
               break;
             }
 
-            // Find all pixels associated with this payment intent
-            const pixels = await Pixel.findAll({
-              where: { paymentIntentId: paymentIntent.id }
+            // Get the pixels from the payment intent metadata
+            const pixels = JSON.parse(paymentIntent.metadata.pixels || '[]');
+            
+            if (!Array.isArray(pixels) || pixels.length === 0) {
+              console.error('No pixels found in payment intent metadata:', paymentIntent.id);
+              break;
+            }
+
+            console.log('Processing bulk payment pixels:', {
+              paymentIntentId: paymentIntent.id,
+              pixelCount: pixels.length,
+              withSecurity
             });
 
-            // Each pixel already has its correct price stored, no need to recalculate
+            // Update each pixel
+            for (const pixel of pixels) {
+              const [existingPixel, created] = await Pixel.findOrCreate({
+                where: { x: pixel.x, y: pixel.y },
+                defaults: {
+                  color: pixel.color,
+                  price: pixel.price,
+                  ownerId,
+                  ownerName,
+                  paymentIntentId: paymentIntent.id,
+                  isSecured: withSecurity === 'true',
+                  securityExpiresAt: withSecurity === 'true' ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null,
+                  lastUpdated: new Date()
+                }
+              });
+
+              if (!created) {
+                await existingPixel.update({
+                  color: pixel.color,
+                  price: pixel.price,
+                  ownerId,
+                  ownerName,
+                  paymentIntentId: paymentIntent.id,
+                  isSecured: withSecurity === 'true',
+                  securityExpiresAt: withSecurity === 'true' ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null,
+                  lastUpdated: new Date()
+                });
+              }
+
+              console.log('Pixel updated:', {
+                x: pixel.x,
+                y: pixel.y,
+                created,
+                price: pixel.price,
+                withSecurity
+              });
+            }
+
             console.log('Bulk payment processed successfully:', {
               paymentIntentId: paymentIntent.id,
               pixelCount: pixels.length
