@@ -79,10 +79,10 @@ router.post('/', async (req, res) => {
       const minRequiredPrice = existingPixel.price + PIXEL_CONFIG.minPrice;
       const epsilon = 0.001; // Small value to handle floating-point precision
       if (price < minRequiredPrice - epsilon) {
-        return res.status(400).json({ 
-          message: `New price must be at least $${PIXEL_CONFIG.minPrice} more than current price`,
-          currentPrice: existingPixel.price
-        });
+      return res.status(400).json({ 
+        message: `New price must be at least $${PIXEL_CONFIG.minPrice} more than current price`,
+        currentPrice: existingPixel.price
+      });
       }
     }
 
@@ -140,7 +140,7 @@ router.post('/', async (req, res) => {
       pixel.price = price;
       pixel.ownerId = ownerId;
       pixel.ownerName = ownerName;
-      pixel.link = link;
+        pixel.link = link;
       pixel.lastUpdated = new Date();
       pixel.isSecured = withSecurity;
       pixel.securityExpiresAt = securityExpiresAt;

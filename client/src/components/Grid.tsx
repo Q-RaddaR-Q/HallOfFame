@@ -32,7 +32,8 @@ function PaymentForm({
   ownerId,
   ownerName,
   minPrice,
-  isProtectedPixel
+  isProtectedPixel,
+  processingFee
 }: { 
   amount: number; 
   onSuccess: () => void; 
@@ -46,11 +47,15 @@ function PaymentForm({
   ownerName: string;
   minPrice: number;
   isProtectedPixel: boolean;
+  processingFee: number;
 }) {
   const stripe = useStripe();
   const elements = useElements();
   const [link, setLink] = useState('');
   const [withSecurity, setWithSecurity] = useState(isProtectedPixel);
+
+  // Calculate total amount including security if enabled
+  const totalAmount = withSecurity ? (bidAmount * 5) + processingFee : bidAmount + processingFee;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -63,12 +68,15 @@ function PaymentForm({
         throw new Error('Card element not found');
       }
 
-      // Create payment intent first
+      // Calculate the total amount including security and processing fee
+      const totalAmount = withSecurity ? (bidAmount * 5) + processingFee : bidAmount + processingFee;
+
+      // Create payment intent first with the correct total amount
       const { clientSecret } = await pixelService.createPaymentIntent(
         pendingPixel.x,
         pendingPixel.y,
         selectedColor,
-        bidAmount,
+        totalAmount, // Send the total amount including security and processing fee
         ownerId,
         ownerName
       );
@@ -95,7 +103,7 @@ function PaymentForm({
           pendingPixel.x,
           pendingPixel.y,
           selectedColor,
-          bidAmount,
+          bidAmount, // Keep the base bid amount for the pixel
           ownerId,
           paymentIntent.id,
           ownerName,
@@ -159,7 +167,7 @@ function PaymentForm({
               backgroundColor: '#f8f9fa',
               borderRadius: '4px'
             }}>
-              <p style={{ margin: '0 0 5px 0' }}>Total cost: ${(bidAmount * 5).toFixed(2)}</p>
+              <p style={{ margin: '0 0 5px 0' }}>Total cost: ${totalAmount.toFixed(2)}</p>
               <p style={{ margin: '0', color: '#666' }}>Your pixel will be secured for 7 days</p>
             </div>
           )}
@@ -230,7 +238,7 @@ function PaymentForm({
             opacity: !stripe || isProcessing ? 0.7 : 1,
           }}
         >
-          {isProcessing ? "Processing..." : `Pay $${amount.toFixed(2)}`}
+          {isProcessing ? "Processing..." : `Pay $${totalAmount.toFixed(2)}`}
         </button>
       </div>
     </form>
@@ -1321,6 +1329,20 @@ export default function PixelCanvas() {
     return id;
   }
 
+  // Add effect to clear selected pixels when mode changes
+  useEffect(() => {
+    selectedPixelsRef.current = [];
+    setSelectedPixels([]);
+    triggerDraw();
+  }, [mode]);
+
+  // Add effect to clear selected pixels when multi-select mode changes
+  useEffect(() => {
+    selectedPixelsRef.current = [];
+    setSelectedPixels([]);
+    triggerDraw();
+  }, [isMultiSelectMode]);
+
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
       {configError && (
@@ -1953,6 +1975,7 @@ export default function PixelCanvas() {
                     ownerName={ownerName}
                     minPrice={minPrice}
                     isProtectedPixel={Boolean(selectedPixel?.isSecured && selectedPixel?.securityExpiresAt && new Date(selectedPixel.securityExpiresAt) > new Date())}
+                    processingFee={processingFee}
                   />
                 </Elements>
               </>

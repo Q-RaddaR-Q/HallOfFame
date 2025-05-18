@@ -135,7 +135,7 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
 
     // Validate input
     if (!Array.isArray(pixels) || pixels.length === 0) {
-      return res.status(400).json({
+      return res.status(400).json({ 
         message: 'Invalid pixels data',
         error: 'Pixels must be a non-empty array'
       });
