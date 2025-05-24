@@ -39,6 +39,21 @@ interface BulkPaymentData {
   };
 }
 
+export interface PixelHistory {
+  id: number;
+  x: number;
+  y: number;
+  color: string;
+  price: number;
+  ownerId: string;
+  ownerName: string;
+  link: string | null;
+  isSecured: boolean;
+  securityExpiresAt: string | null;
+  paymentIntentId: string | null;
+  createdAt: string;
+}
+
 export const pixelService = {
   // Get all pixels
   getAllPixels: async (): Promise<Pixel[]> => {
@@ -181,5 +196,24 @@ export const pixelService = {
   updatePixelLink: async (x: number, y: number, link: string): Promise<Pixel> => {
     const response = await axios.put<Pixel>(`${API_URL}/pixels/${x}/${y}/link`, { link });
     return response.data;
+  },
+
+  // Get pixel history
+  getPixelHistory: async (x: number, y: number): Promise<PixelHistory[]> => {
+    try {
+      const response = await axios.get<PixelHistory[]>(`${API_URL}/pixels/${x}/${y}/history`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error fetching pixel history:', error);
+      if (error.response) {
+        console.error('Axios error details:', {
+          status: error.response.status,
+          data: error.response.data,
+          message: error.message
+        });
+        throw new Error(error.response.data?.message || error.message);
+      }
+      throw error;
+    }
   }
 }; 
