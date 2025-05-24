@@ -47,12 +47,51 @@ router.post('/', async (req, res) => {
   try {
     const { x, y, color, price, ownerId, ownerName, paymentIntentId, link, withSecurity } = req.body;
 
+<<<<<<< HEAD
     // Validate required fields
     if (x === undefined || y === undefined || !color || !price || !ownerId || !ownerName) {
       return res.status(400).json({
         message: 'Missing required fields',
         error: 'x, y, color, price, ownerId, and ownerName are required'
       });
+=======
+    if (isNaN(x) || isNaN(y)) {
+      return res.status(400).json({ message: 'Invalid coordinates' });
+    }
+    
+    // Find existing pixel
+    const existingPixel = await Pixel.findOne({
+      where: { x, y }
+    });
+
+    // If pixel exists and is secured, check if security has expired
+    if (existingPixel && existingPixel.isSecured) {
+      const now = new Date();
+      if (existingPixel.securityExpiresAt && existingPixel.securityExpiresAt > now) {
+        // For protected pixels, require exactly 10x the current price
+        const requiredPrice = existingPixel.price * 10;
+        const epsilon = 0.001; // Small value to handle floating-point precision
+        if (Math.abs(price - requiredPrice) > epsilon) {
+          return res.status(400).json({ 
+            message: `Protected pixel requires exactly $${requiredPrice.toFixed(2)} to purchase`,
+            requiredPrice: requiredPrice,
+            currentPrice: existingPixel.price
+          });
+        }
+      }
+    }
+
+    // If pixel exists and new price is not at least minPrice more, reject
+    if (existingPixel && (!existingPixel.isSecured || !existingPixel.securityExpiresAt || new Date(existingPixel.securityExpiresAt) <= new Date())) {
+      const minRequiredPrice = existingPixel.price + PIXEL_CONFIG.minPrice;
+      const epsilon = 0.001; // Small value to handle floating-point precision
+      if (price < minRequiredPrice - epsilon) {
+        return res.status(400).json({ 
+          message: `New price must be at least $${PIXEL_CONFIG.minPrice} more than current price`,
+          currentPrice: existingPixel.price
+        });
+      }
+>>>>>>> parent of 818ab7e (FixedSomeIssues(Buying in bulk doesnt work with protected)
     }
 
     // If paymentIntentId is provided, verify the payment
