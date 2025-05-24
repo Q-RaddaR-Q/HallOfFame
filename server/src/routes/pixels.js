@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const Pixel = require('../models/Pixel');
-const PixelHistory = require('../models/PixelHistory');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { PIXEL_CONFIG } = require('../config/constants');
 const WebSocket = require('ws');
@@ -45,14 +44,46 @@ router.get('/:x/:y', async (req, res) => {
 // Create or update pixel with payment
 router.post('/', async (req, res) => {
   try {
-    const { x, y, color, price, ownerId, ownerName, paymentIntentId, link, withSecurity } = req.body;
+    const { color, price, ownerId, paymentIntentId, ownerName, link, withSecurity } = req.body;
+    const x = parseInt(req.body.x, 10);
+    const y = parseInt(req.body.y, 10);
 
-    // Validate required fields
-    if (x === undefined || y === undefined || !color || !price || !ownerId || !ownerName) {
-      return res.status(400).json({
-        message: 'Missing required fields',
-        error: 'x, y, color, price, ownerId, and ownerName are required'
+    if (isNaN(x) || isNaN(y)) {
+      return res.status(400).json({ message: 'Invalid coordinates' });
+    }
+    
+    // Find existing pixel
+    const existingPixel = await Pixel.findOne({
+      where: { x, y }
+    });
+
+    // If pixel exists and is secured, check if security has expired
+    if (existingPixel && existingPixel.isSecured) {
+      const now = new Date();
+      if (existingPixel.securityExpiresAt && existingPixel.securityExpiresAt > now) {
+        // For protected pixels, require exactly 10x the current price
+        const requiredPrice = existingPixel.price * 10;
+        const epsilon = 0.001; // Small value to handle floating-point precision
+        if (Math.abs(price - requiredPrice) > epsilon) {
+          return res.status(400).json({ 
+            message: `Protected pixel requires exactly $${requiredPrice.toFixed(2)} to purchase`,
+            requiredPrice: requiredPrice,
+            currentPrice: existingPixel.price
+          });
+        }
+      }
+    }
+
+    // If pixel exists and new price is not at least minPrice more, reject
+    if (existingPixel && (!existingPixel.isSecured || !existingPixel.securityExpiresAt || new Date(existingPixel.securityExpiresAt) <= new Date())) {
+      const minRequiredPrice = existingPixel.price + PIXEL_CONFIG.minPrice;
+      const epsilon = 0.001; // Small value to handle floating-point precision
+      if (price < minRequiredPrice - epsilon) {
+      return res.status(400).json({ 
+        message: `New price must be at least $${PIXEL_CONFIG.minPrice} more than current price`,
+        currentPrice: existingPixel.price
       });
+      }
     }
 
     // If paymentIntentId is provided, verify the payment
@@ -90,38 +121,6 @@ router.post('/', async (req, res) => {
       securityExpiresAt.setDate(securityExpiresAt.getDate() + 7); // Add 7 days
     }
 
-    // Find existing pixel
-    const existingPixel = await Pixel.findOne({
-      where: { x, y }
-    });
-
-    // If pixel exists, save its current state to history
-    if (existingPixel) {
-      await PixelHistory.create({
-        x: existingPixel.x,
-        y: existingPixel.y,
-        color: existingPixel.color,
-        price: existingPixel.price,
-        ownerId: existingPixel.ownerId,
-        ownerName: existingPixel.ownerName,
-        link: existingPixel.link,
-        isSecured: existingPixel.isSecured,
-        securityExpiresAt: existingPixel.securityExpiresAt,
-        paymentIntentId: existingPixel.paymentIntentId
-      });
-
-      console.log('Saved pixel history:', {
-        x: existingPixel.x,
-        y: existingPixel.y,
-        color: existingPixel.color,
-        price: existingPixel.price,
-        ownerName: existingPixel.ownerName,
-        link: existingPixel.link,
-        isSecured: existingPixel.isSecured,
-        securityExpiresAt: existingPixel.securityExpiresAt
-      });
-    }
-
     // Update or create the pixel
     const [pixel, created] = await Pixel.findOrCreate({
       where: { x, y },
@@ -141,7 +140,7 @@ router.post('/', async (req, res) => {
       pixel.price = price;
       pixel.ownerId = ownerId;
       pixel.ownerName = ownerName;
-      pixel.link = link;
+        pixel.link = link;
       pixel.lastUpdated = new Date();
       pixel.isSecured = withSecurity;
       pixel.securityExpiresAt = securityExpiresAt;
@@ -176,11 +175,11 @@ router.post('/', async (req, res) => {
       message: created ? 'Pixel created successfully' : 'Pixel updated successfully'
     });
 
-  } catch (err) {
-    console.error('Error updating pixel:', err);
-    res.status(500).json({ 
-      message: 'Error updating pixel',
-      error: err.message 
+  } catch (error) {
+    console.error('Error creating/updating pixel:', error);
+    return res.status(500).json({ 
+      message: 'Error creating/updating pixel',
+      error: error.message
     });
   }
 });
@@ -328,26 +327,6 @@ router.put('/:x/:y/link', async (req, res) => {
   } catch (err) {
     console.error('Error updating pixel link:', err);
     res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Get pixel history
-router.get('/:x/:y/history', async (req, res) => {
-  try {
-    const { x, y } = req.params;
-    
-    const history = await PixelHistory.findAll({
-      where: { x, y },
-      order: [['createdAt', 'DESC']]
-    });
-
-    res.json(history);
-  } catch (err) {
-    console.error('Error fetching pixel history:', err);
-    res.status(500).json({ 
-      message: 'Error fetching pixel history',
-      error: err.message 
-    });
   }
 });
 

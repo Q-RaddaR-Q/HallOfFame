@@ -6,7 +6,6 @@ const { PIXEL_CONFIG } = require('../config/constants');
 const { Op } = require('sequelize');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
-const PixelHistory = require('../models/PixelHistory');
 
 // Create a temporary table for bulk payment pixels
 const BulkPaymentPixels = require('../models/BulkPaymentPixels');
@@ -325,19 +324,6 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
                   lastUpdated: new Date()
                 });
               }
-
-              // Create history entry for this pixel
-              await PixelHistory.create({
-                x: pixel.x,
-                y: pixel.y,
-                color: pixel.color,
-                price: pixel.price,
-                ownerId,
-                ownerName,
-                paymentIntentId: paymentIntent.id,
-                isSecured: withSecurity === 'true',
-                securityExpiresAt: withSecurity === 'true' ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null
-              });
 
               console.log('Pixel updated:', {
                 x: pixel.x,
