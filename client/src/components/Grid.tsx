@@ -5,6 +5,7 @@ import { Elements, CardElement, useStripe, useElements } from "@stripe/react-str
 import { pixelService, Pixel, PixelHistory } from "../services/pixelService";
 import { configService } from "../services/configService";
 import SelectedPixelsPanel from './SelectedPixelsPanel';
+import TimelineSlider from './TimelineSlider';
 import TopMenu from './TopMenu';
 import websocketService from '../services/websocketService';
 
@@ -542,7 +543,7 @@ export default function PixelCanvas() {
   const [hoveredPixel, setHoveredPixel] = useState<Pixel | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
   const [allPixels, setAllPixels] = useState<Pixel[]>([]);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [withSecurity, setWithSecurity] = useState(false);
   const [userId] = useState(() => localStorage.getItem('userId') || generateUniqueId());
   const [showSecuredPixelWarning, setShowSecuredPixelWarning] = useState(false);
@@ -2701,8 +2702,13 @@ export default function PixelCanvas() {
         `}
       </style>
 
-      {/* Remove TimelineSlider and update TopMenu props */}
-      <TopMenu pixels={allPixels} />
+      {/* Add TimelineSlider in view mode */}
+      {mode === "view" && allPixels.length > 0 && (
+        <TopMenu
+          pixels={allPixels}
+          onTimeChange={(date) => setSelectedDate(date)}
+        />
+      )}
 
       <canvas
         ref={canvasRef}
