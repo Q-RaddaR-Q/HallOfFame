@@ -151,8 +151,12 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
     // Validate input
     if (!Array.isArray(pixels) || pixels.length === 0) {
 <<<<<<< HEAD
+<<<<<<< HEAD
       console.error('Invalid pixels data: not an array or empty');
       return res.status(400).json({ 
+=======
+      return res.status(400).json({
+>>>>>>> parent of 818ab7e (FixedSomeIssues(Buying in bulk doesnt work with protected)
 =======
       return res.status(400).json({
 >>>>>>> parent of 818ab7e (FixedSomeIssues(Buying in bulk doesnt work with protected)

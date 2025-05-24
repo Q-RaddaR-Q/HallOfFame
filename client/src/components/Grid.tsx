@@ -1350,7 +1350,6 @@ export default function PixelCanvas() {
     return id;
   }
 
-<<<<<<< HEAD
   // Add effect to clear selected pixels when mode changes
   useEffect(() => {
     selectedPixelsRef.current = [];
@@ -1375,8 +1374,6 @@ export default function PixelCanvas() {
     }
   };
 
-=======
->>>>>>> parent of 818ab7e (FixedSomeIssues(Buying in bulk doesnt work with protected)
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
       {configError && (
