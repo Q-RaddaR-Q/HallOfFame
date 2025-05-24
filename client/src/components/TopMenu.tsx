@@ -1,11 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
+import TimelineSlider from './TimelineSlider';
 import { Pixel } from '../services/pixelService';
 
 interface TopMenuProps {
   pixels: Pixel[];
+  onTimeChange: (date: Date) => void;
 }
 
-const TopMenu: React.FC<TopMenuProps> = ({ pixels }) => {
+const TopMenu: React.FC<TopMenuProps> = ({ pixels, onTimeChange }) => {
+  const [showTimeline, setShowTimeline] = useState(false);
+
   return (
     <div style={{
       position: 'fixed',
@@ -25,6 +29,24 @@ const TopMenu: React.FC<TopMenuProps> = ({ pixels }) => {
         flexDirection: 'column',
         gap: '10px',
       }}>
+        <button
+          onClick={() => setShowTimeline(!showTimeline)}
+          style={{
+            padding: '10px 15px',
+            backgroundColor: showTimeline ? '#4CAF50' : '#2196F3',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <span>Timeline</span>
+        </button>
+
         <button
           style={{
             padding: '10px 15px',
@@ -73,6 +95,13 @@ const TopMenu: React.FC<TopMenuProps> = ({ pixels }) => {
           Settings
         </button>
       </div>
+
+      {showTimeline && pixels.length > 0 && (
+        <TimelineSlider
+          pixels={pixels}
+          onTimeChange={onTimeChange}
+        />
+      )}
     </div>
   );
 };
