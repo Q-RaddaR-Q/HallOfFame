@@ -164,6 +164,26 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
       });
     }
 
+    // --- PROTECTED PIXEL CHECK ---
+    // Check if any selected pixel is protected (isSecured: true and not expired)
+    const now = new Date();
+    const protectedPixels = await Pixel.findAll({
+      where: {
+        [Op.or]: pixels.map(p => ({ x: p.x, y: p.y })),
+        isSecured: true,
+        securityExpiresAt: { [Op.gt]: now }
+      }
+    });
+    if (protectedPixels.length > 0) {
+      const protectedCoords = protectedPixels.map(p => `(${p.x},${p.y})`).join(', ');
+      return res.status(400).json({
+        message: 'Pixel(s) at ${protectedCoords} are protected and cannot be bought in bulk mode. Please use single pixel mode.',
+        error: `Pixel(s) at ${protectedCoords} are protected and cannot be bought in bulk mode. Please use single pixel mode.`,
+        protectedPixels: protectedCoords
+      });
+    }
+    // --- END PROTECTED PIXEL CHECK ---
+
     // Generate a unique session ID for this bulk payment
     const sessionId = uuidv4();
 
@@ -419,4 +439,4 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
   }
 });
 
-module.exports = router; 
+module.exports = router;

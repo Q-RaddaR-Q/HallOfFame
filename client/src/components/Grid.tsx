@@ -869,16 +869,21 @@ export default function PixelCanvas() {
           if (existingIndex >= 0) {
             // Remove pixel from selection
             selectedPixelsRef.current = selectedPixelsRef.current.filter((_, i) => i !== existingIndex);
+            setSelectedPixels(selectedPixelsRef.current);
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              draw();
+            }
           } else {
-            // Add pixel to selection
+            // Add pixel to selection (no protection check here, no fetch at all)
             selectedPixelsRef.current = [...selectedPixelsRef.current, { x: gridX, y: gridY, color: selectedColor }];
-          }
-          // Update state and trigger redraw
-          setSelectedPixels(selectedPixelsRef.current);
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            draw();
+            setSelectedPixels(selectedPixelsRef.current);
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              draw();
+            }
           }
         } else {
           // Single pixel selection mode
@@ -976,6 +981,39 @@ export default function PixelCanvas() {
 
     setNameValidationAttempted(true);
     if (!ownerName.trim()) {
+      return;
+    }
+
+    // Check for protected pixels before proceeding
+    try {
+      const pixelChecks = await Promise.all(selectedPixelsRef.current.map(async (pixel) => {
+        try {
+          const data = await pixelService.getPixel(pixel.x, pixel.y);
+          return {
+            ...pixel,
+            isSecured: data.isSecured,
+            securityExpiresAt: data.securityExpiresAt,
+            exists: true
+          };
+        } catch (err) {
+          // Type guard for error
+          const status = (err && typeof err === 'object' && ('response' in err) && (err as any).response?.status)
+            || (err && typeof err === 'object' && 'status' in err && (err as any).status);
+          if (status === 404) {
+            return { ...pixel, isSecured: false, securityExpiresAt: null, exists: false };
+          }
+          // For other errors, rethrow
+          throw err;
+        }
+      }));
+      const protectedPixels = pixelChecks.filter(p => p.exists && p.isSecured && p.securityExpiresAt && new Date(p.securityExpiresAt) > new Date());
+      if (protectedPixels.length > 0) {
+        const coords = protectedPixels.map(p => `(${p.x},${p.y})`).join(', ');
+        alert(`Pixel(s) at ${coords} are protected and cannot be bought in bulk mode. Please use single pixel mode.`);
+        return;
+      }
+    } catch (error) {
+      alert('Failed to check pixel protection status. Please try again.');
       return;
     }
 
@@ -1693,7 +1731,7 @@ export default function PixelCanvas() {
                       );
                     })}
                   </div>
-                  <div style={{ 
+                  <div style={{
                     display: "grid", 
                     gridTemplateColumns: "1fr 100px",
                     gap: "10px",
@@ -1967,7 +2005,7 @@ export default function PixelCanvas() {
                       <span>${(bidAmount * 4).toFixed(2)}</span>
                     </div>
                   )}
-                  <div style={{ 
+                  <div style={{
                     display: "grid", 
                     gridTemplateColumns: "1fr 100px",
                     gap: "10px",
@@ -2319,7 +2357,8 @@ export default function PixelCanvas() {
                       <div style={{ textAlign: "center", padding: "20px", color: "#666" }}>
                         No history available for this pixel
                       </div>
-                    )}
+                    )
+                  }
                   </div>
                 </div>
               </div>
@@ -2383,41 +2422,29 @@ export default function PixelCanvas() {
               marginBottom: "20px"
             }}>
               <h4 style={{ margin: "0 0 10px 0", fontSize: "16px" }}>Payment Summary</h4>
-              <div style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}>
-                {selectedPixelsRef.current.map((pixel, index) => {
-                  const existingPixel = existingPixels.find(p => p.x === pixel.x && p.y === pixel.y);
-                  const price = existingPixel ? existingPixel.price + minPrice : minPrice;
-                  return (
-                    <div key={`${pixel.x}-${pixel.y}`} style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 100px",
-                      gap: "10px",
-                      padding: "8px",
-                      backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
-                      borderRadius: "4px",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <div style={{
-                          width: "20px",
-                          height: "20px",
-                          backgroundColor: pixel.color,
-                          border: "1px solid #ccc",
-                          borderRadius: "4px",
-                        }} />
-                        <span>Pixel ({pixel.x}, {pixel.y})</span>
-                      </div>
-                      <span style={{ textAlign: "right" }}>${price.toFixed(2)}</span>
-                    </div>
-                  );
-                })}
-              </div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                <span>Pixel Price:</span>
+                <span>${minPrice.toFixed(2)}</span>
+              </div>
+              {withSecurity && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                  <span>Security (4x):</span>
+                  <span>${(minPrice * 4).toFixed(2)}</span>
+                </div>
+              )}
+              <div style={{
+                display: "grid", 
+                gridTemplateColumns: "1fr 100px",
+                gap: "10px",
+                marginBottom: "5px" 
+              }}>
                 <span>Processing Fee:</span>
                 <span style={{ textAlign: "right" }}>${processingFee.toFixed(2)}</span>
               </div>
               <div style={{ 
-                display: "flex", 
-                justifyContent: "space-between", 
+                display: "grid", 
+                gridTemplateColumns: "1fr 100px",
+                gap: "10px",
                 marginTop: "10px",
                 paddingTop: "10px",
                 borderTop: "1px solid #e9ecef",
