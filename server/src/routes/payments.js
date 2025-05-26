@@ -5,6 +5,11 @@ const Pixel = require('../models/Pixel');
 const { PIXEL_CONFIG } = require('../config/constants');
 const { Op } = require('sequelize');
 const WebSocket = require('ws');
+const { v4: uuidv4 } = require('uuid');
+const PixelHistory = require('../models/PixelHistory');
+
+// Create a temporary table for bulk payment pixels
+const BulkPaymentPixels = require('../models/BulkPaymentPixels');
 
 // Create a payment intent for coloring pixels
 router.post('/create-payment-intent', async (req, res) => {
@@ -159,111 +164,20 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
       });
     }
 
-    // Check each pixel
-    for (const pixel of pixels) {
-      console.log('Processing pixel:', {
+    // Generate a unique session ID for this bulk payment
+    const sessionId = uuidv4();
+
+    // Store pixels in the temporary table
+    await BulkPaymentPixels.bulkCreate(
+      pixels.map(pixel => ({
+        sessionId,
         x: pixel.x,
         y: pixel.y,
+        color: pixel.color,
         price: pixel.price,
         withSecurity: pixel.withSecurity
-      });
-
-      if (!pixel.x || !pixel.y || !pixel.color || !pixel.price) {
-        console.error('Invalid pixel data:', pixel);
-        return res.status(400).json({
-          message: 'Invalid pixel data',
-          error: 'Each pixel must have x, y, color, and price properties'
-        });
-      }
-
-      // Check if pixel exists and validate minimum bid
-      const existingPixel = await Pixel.findOne({
-        where: { x: pixel.x, y: pixel.y }
-      });
-
-      if (existingPixel) {
-        console.log('Existing pixel found:', {
-          x: existingPixel.x,
-          y: existingPixel.y,
-          currentPrice: existingPixel.price,
-          newPrice: pixel.price
-        });
-
-        // Check if pixel is secured and not expired
-        if (existingPixel.isSecured && existingPixel.securityExpiresAt > new Date()) {
-          console.error('Pixel is secured:', {
-            x: pixel.x,
-            y: pixel.y,
-            expiresAt: existingPixel.securityExpiresAt
-          });
-          return res.status(400).json({
-            message: 'Pixel is secured',
-            error: `Pixel at (${pixel.x}, ${pixel.y}) is secured until ${existingPixel.securityExpiresAt}`,
-            securedUntil: existingPixel.securityExpiresAt
-          });
-        }
-
-        const minBid = existingPixel.price + PIXEL_CONFIG.minPrice;
-        if (pixel.price < minBid) {
-          console.error('Bid too low:', {
-            x: pixel.x,
-            y: pixel.y,
-            bid: pixel.price,
-            minBid,
-            currentPrice: existingPixel.price
-          });
-          return res.status(400).json({
-            message: 'Bid too low',
-            error: `Bid must be at least $${minBid.toFixed(2)} to take over pixel at (${pixel.x}, ${pixel.y})`,
-            minimumBid: minBid,
-            currentPrice: existingPixel.price,
-            pixel: { x: pixel.x, y: pixel.y }
-          });
-        }
-      } else if (pixel.price < PIXEL_CONFIG.minPrice) {
-        console.error('New pixel bid too low:', {
-          x: pixel.x,
-          y: pixel.y,
-          bid: pixel.price,
-          minPrice: PIXEL_CONFIG.minPrice
-        });
-        return res.status(400).json({
-          message: 'Bid too low',
-          error: `Bid must be at least $${PIXEL_CONFIG.minPrice} to place a new pixel at (${pixel.x}, ${pixel.y})`,
-          minimumBid: PIXEL_CONFIG.minPrice,
-          pixel: { x: pixel.x, y: pixel.y }
-        });
-      }
-
-      // Add to expected total, applying security multiplier if enabled
-      expectedTotal += pixel.withSecurity ? pixel.price * 4 : pixel.price;
-    }
-
-    console.log('Price validation:', {
-      expectedTotal,
-      receivedTotal: totalAmountNum,
-      difference: Math.abs(expectedTotal - totalAmountNum),
-      withSecurity: pixels[0]?.withSecurity
-    });
-
-    // Verify that the provided total amount matches the sum of individual pixel prices
-    if (Math.abs(expectedTotal - totalAmountNum) > 0.01) {
-      console.error('Total amount mismatch:', {
-        expectedTotal,
-        receivedTotal: totalAmountNum,
-        difference: Math.abs(expectedTotal - totalAmountNum),
-        withSecurity: pixels[0]?.withSecurity
-      });
-      return res.status(400).json({
-        message: 'Total amount mismatch',
-        error: `Total amount (${totalAmountNum}) does not match sum of individual pixel prices (${expectedTotal})`,
-        details: {
-          expectedTotal,
-          receivedTotal: totalAmountNum,
-          withSecurity: pixels[0]?.withSecurity
-        }
-      });
-    }
+      }))
+    );
 
     // Create a PaymentIntent with the total amount
     const paymentIntentData = {
@@ -278,12 +192,7 @@ router.post('/create-bulk-payment-intent', async (req, res) => {
         pixelCount: pixels.length,
         withSecurity: pixels[0].withSecurity ? 'true' : 'false',
         baseAmount: (totalAmountNum / (pixels[0].withSecurity ? 4 : 1)).toFixed(2),
-        pixels: JSON.stringify(pixels.map(p => ({
-          x: p.x,
-          y: p.y,
-          color: p.color,
-          price: p.price
-        })))
+        sessionId // Store the session ID in metadata
       }
     };
 
@@ -364,18 +273,20 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
         // Check if this is a bulk payment
         if (paymentIntent.metadata.pixelCount) {
           try {
-            const { ownerId, ownerName, withSecurity } = paymentIntent.metadata;
+            const { ownerId, ownerName, withSecurity, sessionId } = paymentIntent.metadata;
             
-            if (!ownerId || !ownerName) {
+            if (!ownerId || !ownerName || !sessionId) {
               console.error('Invalid bulk payment metadata:', paymentIntent.id);
               break;
             }
 
-            // Get the pixels from the payment intent metadata
-            const pixels = JSON.parse(paymentIntent.metadata.pixels || '[]');
+            // Get the pixels from the temporary table
+            const pixels = await BulkPaymentPixels.findAll({
+              where: { sessionId }
+            });
             
-            if (!Array.isArray(pixels) || pixels.length === 0) {
-              console.error('No pixels found in payment intent metadata:', paymentIntent.id);
+            if (!pixels || pixels.length === 0) {
+              console.error('No pixels found for session:', sessionId);
               break;
             }
 
@@ -414,6 +325,19 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
                 });
               }
 
+              // Create history entry for this pixel
+              await PixelHistory.create({
+                x: pixel.x,
+                y: pixel.y,
+                color: pixel.color,
+                price: pixel.price,
+                ownerId,
+                ownerName,
+                paymentIntentId: paymentIntent.id,
+                isSecured: withSecurity === 'true',
+                securityExpiresAt: withSecurity === 'true' ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null
+              });
+
               console.log('Pixel updated:', {
                 x: pixel.x,
                 y: pixel.y,
@@ -422,6 +346,11 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
                 withSecurity
               });
             }
+
+            // Clean up the temporary pixels
+            await BulkPaymentPixels.destroy({
+              where: { sessionId }
+            });
 
             console.log('Bulk payment processed successfully:', {
               paymentIntentId: paymentIntent.id,

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { HexColorPicker } from "react-colorful";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
-import { pixelService, Pixel } from "../services/pixelService";
+import { pixelService, Pixel, PixelHistory } from "../services/pixelService";
 import { configService } from "../services/configService";
 import SelectedPixelsPanel from './SelectedPixelsPanel';
 import TimelineSlider from './TimelineSlider';
@@ -32,8 +32,7 @@ function PaymentForm({
   ownerId,
   ownerName,
   minPrice,
-  isProtectedPixel,
-  processingFee
+  isProtectedPixel
 }: { 
   amount: number; 
   onSuccess: () => void; 
@@ -47,15 +46,11 @@ function PaymentForm({
   ownerName: string;
   minPrice: number;
   isProtectedPixel: boolean;
-  processingFee: number;
 }) {
   const stripe = useStripe();
   const elements = useElements();
   const [link, setLink] = useState('');
   const [withSecurity, setWithSecurity] = useState(isProtectedPixel);
-
-  // Calculate total amount including security if enabled
-  const totalAmount = withSecurity ? (bidAmount * 5) + processingFee : bidAmount + processingFee;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -68,15 +63,12 @@ function PaymentForm({
         throw new Error('Card element not found');
       }
 
-      // Calculate the total amount including security and processing fee
-      const totalAmount = withSecurity ? (bidAmount * 5) + processingFee : bidAmount + processingFee;
-
-      // Create payment intent first with the correct total amount
+      // Create payment intent first
       const { clientSecret } = await pixelService.createPaymentIntent(
         pendingPixel.x,
         pendingPixel.y,
         selectedColor,
-        totalAmount, // Send the total amount including security and processing fee
+        bidAmount,
         ownerId,
         ownerName
       );
@@ -103,7 +95,7 @@ function PaymentForm({
           pendingPixel.x,
           pendingPixel.y,
           selectedColor,
-          bidAmount, // Keep the base bid amount for the pixel
+          bidAmount,
           ownerId,
           paymentIntent.id,
           ownerName,
@@ -167,7 +159,7 @@ function PaymentForm({
               backgroundColor: '#f8f9fa',
               borderRadius: '4px'
             }}>
-              <p style={{ margin: '0 0 5px 0' }}>Total cost: ${totalAmount.toFixed(2)}</p>
+              <p style={{ margin: '0 0 5px 0' }}>Total cost: ${(bidAmount * 5).toFixed(2)}</p>
               <p style={{ margin: '0', color: '#666' }}>Your pixel will be secured for 7 days</p>
             </div>
           )}
@@ -238,7 +230,7 @@ function PaymentForm({
             opacity: !stripe || isProcessing ? 0.7 : 1,
           }}
         >
-          {isProcessing ? "Processing..." : `Pay $${totalAmount.toFixed(2)}`}
+          {isProcessing ? "Processing..." : `Pay $${amount.toFixed(2)}`}
         </button>
       </div>
     </form>
@@ -554,6 +546,10 @@ export default function PixelCanvas() {
     expiresAt: Date;
     price: number;
   } | null>(null);
+  const [pixelHistory, setPixelHistory] = useState<PixelHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  // Change slider to vertical orientation
+  const [historySliderIndex, setHistorySliderIndex] = useState(0);
 
   // Add ref for selected pixels
   const selectedPixelsRef = useRef<Array<{ x: number; y: number; color: string }>>([]);
@@ -918,6 +914,8 @@ export default function PixelCanvas() {
           const pixel = await pixelService.getPixel(gridX, gridY);
           setSelectedPixelInfo(pixel);
           setShowPixelInfo(true);
+          // Always fetch history regardless of protection status
+          fetchPixelHistory(gridX, gridY);
         } catch (error) {
           setSelectedPixelInfo(null);
           setShowPixelInfo(false);
@@ -1366,6 +1364,16 @@ export default function PixelCanvas() {
     setSelectedPixels([]);
     triggerDraw();
   }, [isMultiSelectMode]);
+
+  // Add function to fetch history
+  const fetchPixelHistory = async (x: number, y: number) => {
+    try {
+      const history = await pixelService.getPixelHistory(x, y);
+      setPixelHistory(history);
+    } catch (error) {
+      console.error('Error fetching pixel history:', error);
+    }
+  };
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
@@ -1999,7 +2007,6 @@ export default function PixelCanvas() {
                     ownerName={ownerName}
                     minPrice={minPrice}
                     isProtectedPixel={Boolean(selectedPixel?.isSecured && selectedPixel?.securityExpiresAt && new Date(selectedPixel.securityExpiresAt) > new Date())}
-                    processingFee={processingFee}
                   />
                 </Elements>
               </>
@@ -2234,6 +2241,88 @@ export default function PixelCanvas() {
                   </a>
                 </p>
               )}
+
+              {/* Pixel History Section - vertical scrollable slider */}
+              <div style={{ marginTop: "20px" }}>
+                <h4 style={{ margin: 0, fontSize: "16px" }}>Pixel History</h4>
+                <div style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  maxWidth: "100%",
+                  marginTop: "10px"
+                }}>
+                  {/* History entries with vertical scrollbar */}
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    width: "100%",
+                    maxHeight: "220px",
+                    overflowY: "auto",
+                    border: "1px solid #e0e0e0",
+                    borderRadius: "8px",
+                    padding: "10px",
+                    backgroundColor: "white"
+                  }}>
+                    {pixelHistory.length > 0 ? (
+                      pixelHistory.map((history, index) => (
+                        <div
+                          key={history.id}
+                          style={{
+                            padding: "10px",
+                            backgroundColor: index % 2 === 0 ? "#f8f9fa" : "white",
+                            borderRadius: "4px",
+                            border: "1px solid #e9ecef",
+                            display: "flex",
+                            flexDirection: "column"
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" }}>
+                            <div style={{
+                              width: "20px",
+                              height: "20px",
+                              backgroundColor: history.color,
+                              border: "1px solid #ccc",
+                              borderRadius: "4px"
+                            }} />
+                            <div>
+                              <div style={{ fontWeight: "500" }}>{history.ownerName}</div>
+                              <div style={{ fontSize: "12px", color: "#666" }}>
+                                {new Date(history.createdAt).toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#666" }}>
+                            Price: ${history.price.toFixed(2)}
+                            {history.link && (
+                              <span style={{ marginLeft: "8px" }}>
+                                Link: <a href={history.link} target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc" }}>{history.link}</a>
+                              </span>
+                            )}
+                            {history.isSecured && history.securityExpiresAt && (
+                              <span style={{
+                                marginLeft: "8px",
+                                color: "#856404",
+                                backgroundColor: "#fff3cd",
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                                border: "1px solid #ffeeba"
+                              }}>
+                                🔒 Protected until: {new Date(history.securityExpiresAt).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ textAlign: "center", padding: "20px", color: "#666" }}>
+                        No history available for this pixel
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
