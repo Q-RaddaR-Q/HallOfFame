@@ -995,11 +995,9 @@ export default function PixelCanvas() {
             securityExpiresAt: data.securityExpiresAt,
             exists: true
           };
-        } catch (err) {
-          // Type guard for error
-          const status = (err && typeof err === 'object' && ('response' in err) && (err as any).response?.status)
-            || (err && typeof err === 'object' && 'status' in err && (err as any).status);
-          if (status === 404) {
+        } catch (err: any) {
+          // If pixel does not exist (404), treat as not protected
+          if (err && err.response && err.response.status === 404) {
             return { ...pixel, isSecured: false, securityExpiresAt: null, exists: false };
           }
           // For other errors, rethrow
@@ -1009,11 +1007,14 @@ export default function PixelCanvas() {
       const protectedPixels = pixelChecks.filter(p => p.exists && p.isSecured && p.securityExpiresAt && new Date(p.securityExpiresAt) > new Date());
       if (protectedPixels.length > 0) {
         const coords = protectedPixels.map(p => `(${p.x},${p.y})`).join(', ');
-        alert(`Pixel(s) at ${coords} are protected and cannot be bought in bulk mode. Please use single pixel mode.`);
+        setNotification({
+          message: `Pixel(s) at ${coords} are protected and cannot be bought in bulk mode. Please use single pixel mode.`,
+          type: 'error'
+        });
         return;
       }
     } catch (error) {
-      alert('Failed to check pixel protection status. Please try again.');
+      setNotification({ message: 'Failed to check pixel protection status. Please try again.', type: 'error' });
       return;
     }
 
@@ -1413,22 +1414,51 @@ export default function PixelCanvas() {
     }
   };
 
+  const [notification, setNotification] = useState<{ message: string; type: 'error' | 'info' | null }>({ message: '', type: null });
+
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
-      {configError && (
-        <div style={{
-          position: "absolute",
-          top: 20,
-          left: "50%",
-          transform: "translateX(-50%)",
-          backgroundColor: "#ff4444",
-          color: "white",
-          padding: "10px 20px",
-          borderRadius: "6px",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-          zIndex: 1000,
-        }}>
-          {configError}
+      {/* Fancy Notification Bar */}
+      {notification.message && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 20,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: notification.type === 'error' ? '#ff4444' : '#2196F3',
+            color: 'white',
+            padding: '14px 32px',
+            borderRadius: '8px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            zIndex: 2000,
+            fontSize: '16px',
+            fontWeight: 500,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            minWidth: '320px',
+            maxWidth: '90vw',
+            animation: 'popupFadeIn 0.3s',
+          }}
+        >
+          <span style={{ flex: 1 }}>{notification.message}</span>
+          <button
+            onClick={() => setNotification({ message: '', type: null })}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'white',
+              fontSize: '20px',
+              cursor: 'pointer',
+              marginLeft: '12px',
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+            aria-label="Dismiss notification"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -2032,7 +2062,7 @@ export default function PixelCanvas() {
 
                 {/* Payment Form */}
                 <Elements stripe={stripe}>
-                  <PaymentForm
+                                   <PaymentForm
                     amount={withSecurity ? (bidAmount * 5) + processingFee : bidAmount + processingFee}
                     onSuccess={handlePaymentSuccess}
                     onCancel={() => setShowPaymentForm(false)}
@@ -2625,13 +2655,6 @@ export default function PixelCanvas() {
             onMouseLeave={(e) => {
               e.currentTarget.style.backgroundColor = "rgba(0, 102, 204, 0.08)";
               e.currentTarget.style.transform = "translateY(0)";
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              const link = hoveredPixel.link;
-              if (link) {
-                window.open(link, '_blank');
-              }
             }}
           >
             {hoveredPixel.link}
