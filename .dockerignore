@@ -1,0 +1,12 @@
+# .dockerignore for frontend and backend
+node_modules
+npm-debug.log
+dist
+build
+.env
+*.sqlite
+*.db
+*.sqlite3
+coverage
+client/node_modules
+server/node_modules
