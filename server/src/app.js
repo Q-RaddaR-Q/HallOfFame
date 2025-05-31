@@ -4,6 +4,8 @@ const dotenv = require('dotenv');
 const sequelize = require('./config/database');
 const WebSocket = require('ws');
 const path = require('path');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpecs = require('./config/swagger');
 
 // Load environment variables
 dotenv.config();
@@ -13,6 +15,9 @@ const app = express();
 
 // Middleware
 app.use(cors());
+
+// Swagger documentation route
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // Regular JSON middleware for all routes except webhook
 app.use((req, res, next) => {

@@ -6,7 +6,24 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { PIXEL_CONFIG } = require('../config/constants');
 const WebSocket = require('ws');
 
-// Get all pixels
+/**
+ * @swagger
+ * /api/pixels:
+ *   get:
+ *     summary: Get all pixels
+ *     tags: [Pixels]
+ *     responses:
+ *       200:
+ *         description: List of all pixels
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Pixel'
+ *       500:
+ *         description: Server error
+ */
 router.get('/', async (req, res) => {
   try {
     const pixels = await Pixel.findAll();
@@ -17,7 +34,39 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get pixel by coordinates
+/**
+ * @swagger
+ * /api/pixels/{x}/{y}:
+ *   get:
+ *     summary: Get pixel by coordinates
+ *     tags: [Pixels]
+ *     parameters:
+ *       - in: path
+ *         name: x
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: X coordinate
+ *       - in: path
+ *         name: y
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Y coordinate
+ *     responses:
+ *       200:
+ *         description: Pixel found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Pixel'
+ *       400:
+ *         description: Invalid coordinates
+ *       404:
+ *         description: Pixel not found
+ *       500:
+ *         description: Server error
+ */
 router.get('/:x/:y', async (req, res) => {
   try {
     const x = parseInt(req.params.x, 10);
@@ -42,7 +91,71 @@ router.get('/:x/:y', async (req, res) => {
   }
 });
 
-// Create or update pixel with payment
+/**
+ * @swagger
+ * /api/pixels:
+ *   post:
+ *     summary: Create or update a pixel
+ *     tags: [Pixels]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - x
+ *               - y
+ *               - color
+ *               - price
+ *               - ownerId
+ *               - ownerName
+ *             properties:
+ *               x:
+ *                 type: integer
+ *                 description: X coordinate
+ *               y:
+ *                 type: integer
+ *                 description: Y coordinate
+ *               color:
+ *                 type: string
+ *                 description: Color of the pixel
+ *               price:
+ *                 type: number
+ *                 description: Price of the pixel
+ *               ownerId:
+ *                 type: string
+ *                 format: uuid
+ *                 description: ID of the pixel owner
+ *               ownerName:
+ *                 type: string
+ *                 description: Name of the pixel owner
+ *               link:
+ *                 type: string
+ *                 description: Optional link associated with the pixel
+ *               withSecurity:
+ *                 type: boolean
+ *                 description: Whether to secure the pixel
+ *               paymentIntentId:
+ *                 type: string
+ *                 description: Stripe payment intent ID
+ *     responses:
+ *       200:
+ *         description: Pixel created or updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 pixel:
+ *                   $ref: '#/components/schemas/Pixel'
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Missing required fields or invalid payment
+ *       500:
+ *         description: Server error
+ */
 router.post('/', async (req, res) => {
   try {
     const { x, y, color, price, ownerId, ownerName, paymentIntentId, link, withSecurity } = req.body;
@@ -185,7 +298,68 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Handle successful payment
+/**
+ * @swagger
+ * /api/pixels/payment-success:
+ *   post:
+ *     summary: Handle successful payment for a pixel
+ *     tags: [Pixels]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *               - amount
+ *               - status
+ *               - metadata
+ *             properties:
+ *               id:
+ *                 type: string
+ *                 description: Payment intent ID
+ *               amount:
+ *                 type: number
+ *                 description: Payment amount
+ *               status:
+ *                 type: string
+ *                 description: Payment status
+ *               metadata:
+ *                 type: object
+ *                 properties:
+ *                   x:
+ *                     type: string
+ *                     description: X coordinate
+ *                   y:
+ *                     type: string
+ *                     description: Y coordinate
+ *                   color:
+ *                     type: string
+ *                     description: Pixel color
+ *                   ownerId:
+ *                     type: string
+ *                     description: Owner ID
+ *                   ownerName:
+ *                     type: string
+ *                     description: Owner name
+ *     responses:
+ *       200:
+ *         description: Payment processed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 pixel:
+ *                   $ref: '#/components/schemas/Pixel'
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Invalid payment data
+ *       500:
+ *         description: Server error
+ */
 router.post('/payment-success', async (req, res) => {
   try {
     const { id, amount, status, metadata } = req.body;
@@ -256,7 +430,29 @@ router.post('/payment-success', async (req, res) => {
   }
 });
 
-// Get free pixel count for a user
+/**
+ * @swagger
+ * /api/pixels/free-count/{browserId}:
+ *   get:
+ *     summary: Get free pixel count for a user
+ *     tags: [Pixels]
+ *     parameters:
+ *       - in: path
+ *         name: browserId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Browser ID of the user
+ *     responses:
+ *       200:
+ *         description: Free pixel count
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: number
+ *       500:
+ *         description: Server error
+ */
 router.get('/free-count/:browserId', async (req, res) => {
   try {
     const { browserId } = req.params;
@@ -273,7 +469,33 @@ router.get('/free-count/:browserId', async (req, res) => {
   }
 });
 
-// Get pixel configuration
+/**
+ * @swagger
+ * /api/pixels/config:
+ *   get:
+ *     summary: Get pixel configuration
+ *     tags: [Pixels]
+ *     responses:
+ *       200:
+ *         description: Pixel configuration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 minPrice:
+ *                   type: number
+ *                   description: Minimum price for a pixel
+ *                 gridSize:
+ *                   type: object
+ *                   properties:
+ *                     width:
+ *                       type: number
+ *                     height:
+ *                       type: number
+ *       500:
+ *         description: Server error
+ */
 router.get('/config', async (req, res) => {
   try {
     res.json(PIXEL_CONFIG);
@@ -283,7 +505,64 @@ router.get('/config', async (req, res) => {
   }
 });
 
-// Update pixel
+/**
+ * @swagger
+ * /api/pixels/{x}/{y}:
+ *   put:
+ *     summary: Update a pixel
+ *     tags: [Pixels]
+ *     parameters:
+ *       - in: path
+ *         name: x
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: X coordinate
+ *       - in: path
+ *         name: y
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Y coordinate
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - color
+ *               - price
+ *               - ownerId
+ *               - ownerName
+ *             properties:
+ *               color:
+ *                 type: string
+ *                 description: New color for the pixel
+ *               price:
+ *                 type: number
+ *                 description: New price for the pixel
+ *               ownerId:
+ *                 type: string
+ *                 format: uuid
+ *                 description: New owner ID
+ *               ownerName:
+ *                 type: string
+ *                 description: New owner name
+ *     responses:
+ *       200:
+ *         description: Pixel updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Pixel'
+ *       400:
+ *         description: Invalid input or price too low
+ *       404:
+ *         description: Pixel not found
+ *       500:
+ *         description: Server error
+ */
 router.put('/:x/:y', async (req, res) => {
   try {
     const { x, y } = req.params;
@@ -301,7 +580,51 @@ router.put('/:x/:y', async (req, res) => {
   }
 });
 
-// Update pixel link
+/**
+ * @swagger
+ * /api/pixels/{x}/{y}/link:
+ *   put:
+ *     summary: Update pixel link
+ *     tags: [Pixels]
+ *     parameters:
+ *       - in: path
+ *         name: x
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: X coordinate
+ *       - in: path
+ *         name: y
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Y coordinate
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - link
+ *             properties:
+ *               link:
+ *                 type: string
+ *                 description: New link for the pixel
+ *     responses:
+ *       200:
+ *         description: Link updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Pixel'
+ *       400:
+ *         description: Invalid coordinates
+ *       404:
+ *         description: Pixel not found
+ *       500:
+ *         description: Server error
+ */
 router.put('/:x/:y/link', async (req, res) => {
   try {
     const x = parseInt(req.params.x, 10);
@@ -331,7 +654,54 @@ router.put('/:x/:y/link', async (req, res) => {
   }
 });
 
-// Get pixel history
+/**
+ * @swagger
+ * /api/pixels/{x}/{y}/history:
+ *   get:
+ *     summary: Get pixel history
+ *     tags: [Pixels]
+ *     parameters:
+ *       - in: path
+ *         name: x
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: X coordinate
+ *       - in: path
+ *         name: y
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Y coordinate
+ *     responses:
+ *       200:
+ *         description: Pixel history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   x:
+ *                     type: integer
+ *                   y:
+ *                     type: integer
+ *                   color:
+ *                     type: string
+ *                   price:
+ *                     type: number
+ *                   ownerId:
+ *                     type: string
+ *                     format: uuid
+ *                   ownerName:
+ *                     type: string
+ *                   createdAt:
+ *                     type: string
+ *                     format: date-time
+ *       500:
+ *         description: Server error
+ */
 router.get('/:x/:y/history', async (req, res) => {
   try {
     const { x, y } = req.params;

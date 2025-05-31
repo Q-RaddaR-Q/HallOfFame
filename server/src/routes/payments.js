@@ -11,7 +11,61 @@ const PixelHistory = require('../models/PixelHistory');
 // Create a temporary table for bulk payment pixels
 const BulkPaymentPixels = require('../models/BulkPaymentPixels');
 
-// Create a payment intent for coloring pixels
+/**
+ * @swagger
+ * /api/payments/create-payment-intent:
+ *   post:
+ *     summary: Create a payment intent for a single pixel
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - x
+ *               - y
+ *               - color
+ *               - price
+ *               - ownerId
+ *               - ownerName
+ *             properties:
+ *               x:
+ *                 type: integer
+ *                 description: X coordinate of the pixel
+ *               y:
+ *                 type: integer
+ *                 description: Y coordinate of the pixel
+ *               color:
+ *                 type: string
+ *                 description: Color of the pixel
+ *               price:
+ *                 type: number
+ *                 description: Price of the pixel
+ *               ownerId:
+ *                 type: string
+ *                 format: uuid
+ *                 description: ID of the pixel owner
+ *               ownerName:
+ *                 type: string
+ *                 description: Name of the pixel owner
+ *     responses:
+ *       200:
+ *         description: Payment intent created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 clientSecret:
+ *                   type: string
+ *                   description: Stripe client secret for payment
+ *       400:
+ *         description: Invalid input or bid too low
+ *       500:
+ *         description: Server error
+ */
 router.post('/create-payment-intent', async (req, res) => {
   try {
     console.log('=== Payment Intent Creation Request ===');
@@ -131,7 +185,79 @@ router.post('/create-payment-intent', async (req, res) => {
   }
 });
 
-// Create a bulk payment intent for multiple pixels
+/**
+ * @swagger
+ * /api/payments/create-bulk-payment-intent:
+ *   post:
+ *     summary: Create a payment intent for multiple pixels
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - pixels
+ *               - totalAmount
+ *               - ownerId
+ *               - ownerName
+ *             properties:
+ *               pixels:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - x
+ *                     - y
+ *                     - color
+ *                     - price
+ *                   properties:
+ *                     x:
+ *                       type: integer
+ *                       description: X coordinate
+ *                     y:
+ *                       type: integer
+ *                       description: Y coordinate
+ *                     color:
+ *                       type: string
+ *                       description: Color of the pixel
+ *                     price:
+ *                       type: number
+ *                       description: Price of the pixel
+ *                     withSecurity:
+ *                       type: boolean
+ *                       description: Whether to secure the pixel
+ *               totalAmount:
+ *                 type: number
+ *                 description: Total amount for all pixels
+ *               ownerId:
+ *                 type: string
+ *                 format: uuid
+ *                 description: ID of the pixel owner
+ *               ownerName:
+ *                 type: string
+ *                 description: Name of the pixel owner
+ *     responses:
+ *       200:
+ *         description: Bulk payment intent created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 clientSecret:
+ *                   type: string
+ *                   description: Stripe client secret for payment
+ *                 sessionId:
+ *                   type: string
+ *                   format: uuid
+ *                   description: Session ID for the bulk payment
+ *       400:
+ *         description: Invalid input or protected pixels
+ *       500:
+ *         description: Server error
+ */
 router.post('/create-bulk-payment-intent', async (req, res) => {
   try {
     const { pixels, totalAmount, ownerId, ownerName } = req.body;
