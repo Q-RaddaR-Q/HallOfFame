@@ -5,7 +5,7 @@ WORKDIR /app
 
 COPY client/package.json client/package-lock.json ./client/
 WORKDIR /app/client
-RUN npm ci
+RUN npm install
 COPY client/ ./
 RUN npm run build
 
