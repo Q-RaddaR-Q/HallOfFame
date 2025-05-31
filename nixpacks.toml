@@ -5,4 +5,7 @@ nixPkgs = ["nodejs_18", "npm-9_x"]
 cmds = ["cd server && npm ci"]
 
 [start]
-cmd = "cd server && npm start"
+cmd = "cd server && PORT=8080 npm start"
+
+[variables]
+PORT = "8080"
