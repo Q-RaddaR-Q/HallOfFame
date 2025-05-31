@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["docker", "docker compose"]
+nixPkgs = ["docker"]
 
 [phases.install]
 cmds = [
