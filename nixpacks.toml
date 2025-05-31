@@ -1,17 +1,16 @@
 [phases.setup]
-nixPkgs = ["nodejs_18", "npm-9_x"]
+nixPkgs = ["docker", "docker compose"]
 
 [phases.install]
 cmds = [
-  "cd server && npm install",
-  "cd client && npm install"
+  "docker compose build"
 ]
 
 [phases.build]
-cmds = ["cd client && npm run build"]
+cmds = ["docker compose up -d"]
 
 [start]
-cmd = "cd server && npm start"
+cmd = "docker compose up"
 
 [variables]
 PORT = "8080"
