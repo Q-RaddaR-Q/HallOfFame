@@ -134,10 +134,12 @@ The API is documented using Swagger/OpenAPI. Key endpoints include:
 - POST /api/pixels - Place a new pixel
 - PUT /api/pixels/:id - Update a pixel
 - DELETE /api/pixels/:id - Delete a pixel
+- ...
 
 ### Payments
 - POST /api/payments/create-intent - Create payment intent
 - POST /api/payments/webhook - Handle Stripe webhooks
+- ...
 
 Check out the full Swagger/OpenAPI documentation here: [https://halloffame-production.up.railway.app/api-docs/]
 
