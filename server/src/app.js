@@ -53,7 +53,7 @@ const PORT = process.env.PORT || 5000;
 // Create HTTP server
 const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log('Webhook endpoint:', `http://localhost:${PORT}/api/payments/webhook`);
+  console.log('Webhook endpoint:', `${process.env.REACT_APP_API_URL}/payments/webhook`);
 });
 
 // Create WebSocket server
