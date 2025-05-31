@@ -2,10 +2,22 @@
 nixPkgs = ["nodejs_18", "npm-9_x"]
 
 [phases.install]
-cmds = ["cd server && npm ci"]
+cmds = [
+  "cd server && npm ci",
+  "cd client && npm ci"
+]
+
+[phases.build]
+cmds = ["cd client && npm run build"]
 
 [start]
-cmd = "cd server && PORT=8080 npm start"
+cmd = "cd server && npm start"
 
 [variables]
 PORT = "8080"
+NODE_ENV = "production"
+REACT_APP_API_URL = "https://halloffame-production.up.railway.app/api"
+REACT_APP_STRIPE_PUBLIC_KEY = "pk_test_51RHVtNHHcwLQtpHburgmdkf6HJI0a36u6WHAb3VPv48X1nK0WUJAz5jY7aDdJVvQOwtLlJxEYzjk0SOSjFNMGQBQ00FUrbGbl3"
+
+[persistence]
+paths = ["server/database.sqlite"]

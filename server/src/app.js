@@ -3,6 +3,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const sequelize = require('./config/database');
 const WebSocket = require('ws');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
@@ -22,9 +23,23 @@ app.use((req, res, next) => {
   }
 });
 
-// Routes
+// Serve static files from the React app
+app.use(express.static(path.join(__dirname, '../../client/build')));
+
+// API Routes
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/pixels', require('./routes/pixels'));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// The "catchall" handler: for any request that doesn't
+// match one above, send back React's index.html file.
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../../client/build/index.html'));
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
